@@ -1,0 +1,26 @@
+name: Auto Label PRs
+
+# pull_request_target gives fork PRs a token that can label. Safe here: the
+# labeler reads changed file paths only and never checks out PR code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+# A new push to a pull request cancels its older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label PRs based on file paths
+        uses: actions/labeler@v7
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          sync-labels: true

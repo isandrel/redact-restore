@@ -1,0 +1,34 @@
+name: Greetings
+
+on: [pull_request_target, issues]
+
+jobs:
+  greeting:
+    runs-on: ubuntu-latest
+    # Skip bot accounts.
+    if: github.actor != 'dependabot[bot]' && github.actor != 'github-actions[bot]'
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      # Comments only; it never checks out or runs code from the pull request.
+      - uses: actions/first-interaction@v3
+        continue-on-error: true
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: |
+            👋 Welcome to **Redact Restore**, and thanks for opening your first issue!
+
+            - Please make sure it contains **synthetic values only**: never a real secret, email, name or token.
+            - If an original value reached the model, close this issue and [report it privately](${{ github.server_url }}/${{ github.repository }}/security/advisories/new) instead.
+            - A maintainer will review it and may ask for details.
+
+            📚 See the [Contributing Guide](${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/CONTRIBUTING.md).
+          pr_message: |
+            🎉 Welcome to **Redact Restore**, and thanks for your first contribution!
+
+            - CI runs the format check, type-check, manifest validation and tests.
+            - Please complete the privacy checklist in the pull request template.
+            - A maintainer will review your changes.
+
+            📚 See the [Contributing Guide](${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/CONTRIBUTING.md).

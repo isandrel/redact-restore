@@ -1,0 +1,74 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior (not a leak; report leaks privately)
+title: "🐛 [Bug]: "
+labels: ["bug"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste real secrets, emails, names or tokens.** Use synthetic values such as `alice@example.com` or `Project Phoenix`.
+        If an original value reached the model, that is a security issue: [report it privately](https://github.com/isandrel/redact-restore/security/advisories/new).
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: This report contains synthetic values only
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Options: custom_values = "Project Phoenix", restore_mode = all
+        2. Prompt: "..."
+        3. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Claude Code CLI
+        - Claude Desktop, Code tab (Local)
+        - Both
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Claude Code (`claude --version`, or `/status` in Desktop Code) and Redact Restore
+      placeholder: Claude Code 2.1.287, Redact Restore 0.13.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Non-secret Options
+      description: restore_mode, detectors, placeholder format, status settings. Never the values in custom_values.
+      render: json

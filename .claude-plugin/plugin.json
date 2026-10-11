@@ -1,0 +1,134 @@
+{
+  "name": "redact-restore",
+  "version": "0.1.0",
+  "description": "Reversible redaction for Claude Code: private values are replaced with placeholders before the model API sees them and restored locally. No API gateway.",
+  "displayName": "redact-restore",
+  "author": {
+    "name": "isandrel",
+    "url": "https://github.com/isandrel"
+  },
+  "homepage": "https://github.com/isandrel/redact-restore",
+  "repository": "https://github.com/isandrel/redact-restore",
+  "license": "AGPL-3.0-only",
+  "keywords": ["privacy", "redaction", "pii", "secrets", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable privacy filtering",
+      "description": "Redact supported text before it enters Claude model context.",
+      "default": true
+    },
+    "custom_values": {
+      "type": "string",
+      "title": "Exact private values",
+      "description": "One value per entry, matched exactly as typed and masked as {{PRIVATE:CUSTOM#<id>}}. Stored in the system keychain. To give a value its own label or a fixed alias, use /redact-restore rules. Entered only on your own machine.",
+      "multiple": true,
+      "sensitive": true
+    },
+    "custom_case_insensitive": {
+      "type": "boolean",
+      "title": "Ignore capitalization in custom matches",
+      "description": "Match configured private values regardless of case.",
+      "default": false
+    },
+    "redact_emails": {
+      "type": "boolean",
+      "title": "Automatically mask email addresses",
+      "description": "Detect email addresses with a simple built-in pattern.",
+      "default": true
+    },
+    "enable_detectors": {
+      "type": "string",
+      "title": "Extra detectors",
+      "description": "Comma-separated detector ids or groups to turn on besides the defaults, e.g. gitleaks.generic-api-key, or groups gitleaks, all. Most detectors, including ipv4, phone and us_ssn, are on by default.",
+      "default": ""
+    },
+    "disable_detectors": {
+      "type": "string",
+      "title": "Disabled detectors",
+      "description": "Comma-separated detector ids or groups to turn off, e.g. ipv4, phone, us_ssn, cn_phone, secret_assignment, groups network, pii, cn, gitleaks (all 212 rules), or gitleaks.<rule-id>. Wins over Extra detectors.",
+      "default": ""
+    },
+    "placeholder_format": {
+      "type": "string",
+      "title": "Placeholder format",
+      "description": "How placeholders look. Default {{PRIVATE:{label}#{id}}}, e.g. {{PRIVATE:EMAIL#3fa1c09e8b2d}}. Must contain {id} once, may contain {label}, start with literal text, have no whitespace, and separate {label} and {id}. Alternatives: {{{label}_{id}}}, PRIVATE_{label}_{id} (identifier style, safe unquoted in YAML and templates), <<{label}:{id}>>.",
+      "default": "{{PRIVATE:{label}#{id}}}"
+    },
+    "placeholder_id_length": {
+      "type": "number",
+      "title": "Placeholder id length",
+      "description": "Random hex characters per placeholder, 8 to 32. Default 12 keeps placeholders short and unique within a session.",
+      "default": 12
+    },
+    "restore_display": {
+      "type": "boolean",
+      "title": "Restore local message display",
+      "description": "Show original values in locally rendered chat messages.",
+      "default": true
+    },
+    "restore_streaming": {
+      "type": "boolean",
+      "title": "Restore while replies stream",
+      "description": "Show original values while a reply is still streaming, not only once it is complete. The engine records the rewritten text, which is masked again before it is stored; off keeps placeholders visible until the reply finishes.",
+      "default": false
+    },
+    "restore_mode": {
+      "type": "string",
+      "title": "Restore original values in tool calls",
+      "description": "all: every local tool gets original values (shell, file edits, local MCP) except keep_tools. files: only Write/Edit/NotebookEdit. none: tools always get placeholder text.",
+      "options": ["all", "files", "none"],
+      "default": "all"
+    },
+    "keep_tools": {
+      "type": "string",
+      "title": "Extra tools that keep placeholders",
+      "description": "Comma-separated tool names added to the built-in list of model-bound and remote tools (Agent, Task, Workflow, WebFetch, WebSearch, SendMessage, Skill, RemoteTrigger, CronCreate, ScheduleWakeup, SendFeedback, PushNotification, Artifact, ArtifactData, ArtifactComments), which always keep placeholders. * matches any text, e.g. mcp__remote__*.",
+      "default": ""
+    },
+    "deny_unrestored_tools": {
+      "type": "string",
+      "title": "Extra tools refused on placeholders",
+      "description": "Comma-separated tool names added to the built-in list (Write, Edit, NotebookEdit). Refused when they would receive placeholder text without restoration.",
+      "default": ""
+    },
+    "allow_media": {
+      "type": "boolean",
+      "title": "Allow unscannable media",
+      "description": "Send images, PDFs and other attachments that Redact Restore cannot scan. Off: they are withheld or the prompt is refused.",
+      "default": false
+    },
+    "outbound_audit": {
+      "type": "boolean",
+      "title": "Audit outgoing requests",
+      "description": "Before each model request, scan the conversation's user-side content and refuse to send when a private value is still unmasked.",
+      "default": true
+    },
+    "status_line": {
+      "type": "string",
+      "title": "Status line",
+      "description": "Line under the prompt: off, count (\"4 private values masked\"), or detailed (counts by kind, tool restore mode, audit). Shows counts only, never values.",
+      "options": ["off", "count", "detailed"],
+      "default": "count"
+    },
+    "status_format": {
+      "type": "string",
+      "title": "Status line template",
+      "description": "Optional template replacing the preset, e.g. \"{state} 🔒{masked} +{lastTurn} ⛔{blocked}\". Fields: {masked} {emails} {detected} {custom} {occurrences} {lastTurn} {restored} {kept} {denied} {audits} {blocked} {media} {state} {mode} {audit} {streaming} {version}.",
+      "default": ""
+    },
+    "status_file": {
+      "type": "boolean",
+      "title": "Write status for a status-line script",
+      "description": "Write counters and state (never values) to ~/.claude/redact-restore/status/<session_id>.json so a custom statusLine command can show them.",
+      "default": false
+    },
+    "rule_labels": {
+      "type": "string",
+      "title": "Labels in the rule form",
+      "description": "Comma-separated labels offered in the rules pane's Label list, e.g. CUSTOMER, VENDOR, TEAM. Empty: the built-in list (CUSTOM, NAME, CUSTOMER, ORG, PROJECT, HOST, EMAIL, USER, SECRET, ADDRESS, PHONE). Labels your rules already use are always added, and Other label… takes any label.",
+      "default": ""
+    }
+  }
+}

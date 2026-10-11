@@ -1,0 +1,5 @@
+{
+  "name": "redact-restore-probe",
+  "version": "0.0.1",
+  "description": "Test-only probe: logs booleans about raw model answers"
+}

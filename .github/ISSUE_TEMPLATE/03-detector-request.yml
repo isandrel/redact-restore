@@ -1,0 +1,40 @@
+name: 🔎 Detector Request
+description: A secret or personal-data format that should be masked but is not
+title: "🔎 [Detector]: "
+labels: ["enhancement", "detector"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste a real key or real personal data.** Describe the format and give a synthetic example with the same shape.
+
+  - type: input
+    id: kind
+    attributes:
+      label: What Should Be Detected
+      placeholder: "Example: Acme Cloud API key"
+    validations:
+      required: true
+
+  - type: textarea
+    id: format
+    attributes:
+      label: Format
+      description: Prefix, length, character set, checksum, and a link to the provider's documentation
+    validations:
+      required: true
+
+  - type: input
+    id: example
+    attributes:
+      label: Synthetic Example
+      placeholder: "acme_live_0000000000000000000000000000"
+    validations:
+      required: true
+
+  - type: textarea
+    id: false-positives
+    attributes:
+      label: Look-alikes That Must Not Match
+      description: Ordinary text with a similar shape (IDs, hashes, version strings)

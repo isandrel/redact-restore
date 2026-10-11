@@ -1,0 +1,31 @@
+name: ✨ Feature Request
+description: Suggest a new feature or improvement
+title: "✨ [Feature]: "
+labels: ["enhancement"]
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy Impact
+      description: Could this let an original value reach the model API, or restore a value where it should not?
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered

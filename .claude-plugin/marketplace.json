@@ -1,0 +1,14 @@
+{
+  "name": "redact-restore",
+  "owner": {
+    "name": "isandrel",
+    "url": "https://github.com/isandrel"
+  },
+  "plugins": [
+    {
+      "name": "redact-restore",
+      "source": "./"
+    }
+  ],
+  "description": "Redact Restore: reversible redaction mod for Claude Code"
+}

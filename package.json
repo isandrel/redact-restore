@@ -1,0 +1,20 @@
+{
+  "name": "redact-restore-dev",
+  "private": true,
+  "type": "module",
+  "description": "Development tooling only (Bun scripts and their types); the mod itself has no dependencies.",
+  "scripts": {
+    "check": "tsc -p . && tsc -p tsconfig.tools.json",
+    "test": "claude plugin test .",
+    "sync-gitleaks": "bun scripts/sync-gitleaks.ts",
+    "format": "biome format --write . && dprint fmt",
+    "format:check": "biome format . && dprint check",
+    "release-notes": "bun scripts/release-notes.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/bun": "1.3.11",
+    "dprint": "0.61.1",
+    "typescript": "5.8.3"
+  }
+}

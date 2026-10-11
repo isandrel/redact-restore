@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to a pull request cancels its older run; pushes to main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # The CLI runs only offline commands here (validate, test); no login is needed.
+  CLAUDE_CODE_VERSION: 2.1.287
+  DISABLE_AUTOUPDATER: 1
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+
+jobs:
+  check:
+    name: Format, types, validate, test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dev tooling
+        run: bun install --frozen-lockfile
+
+      - name: Format
+        run: bun run format:check
+
+      - name: Type-check tooling
+        run: bunx tsc -p tsconfig.tools.json
+
+      - name: Install Claude Code
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Validate manifest, hooks and marketplace
+        run: |
+          claude plugin validate .claude-plugin/plugin.json
+          claude plugin validate .
+
+      - name: Unit and integration tests
+        run: claude plugin test .
+
+      - name: Release notes for the current version
+        run: bun scripts/release-notes.ts "v$(bun -e 'console.log((await Bun.file(".claude-plugin/plugin.json").json()).version)')"

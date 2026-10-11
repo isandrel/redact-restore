@@ -1,0 +1,7 @@
+{
+  "extends": "./.claude-plugin/types/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true
+  },
+  "exclude": ["tests/e2e/*.ts", "scripts", ".claude", "node_modules"]
+}

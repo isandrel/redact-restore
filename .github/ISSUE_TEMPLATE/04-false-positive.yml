@@ -1,0 +1,35 @@
+name: 🎯 False Positive
+description: Ordinary text that was masked by mistake
+title: "🎯 [False positive]: "
+labels: ["bug", "false-positive"]
+
+body:
+  - type: input
+    id: label
+    attributes:
+      label: Placeholder Label
+      description: The label in the placeholder, e.g. SECRET, CARD, GITHUB_TOKEN, or a gitleaks rule label
+    validations:
+      required: true
+
+  - type: textarea
+    id: text
+    attributes:
+      label: Text That Was Masked
+      description: The surrounding text with the masked part shown, synthetic or non-sensitive only
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why It Is Not Private
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: Claude Code 2.1.287, Redact Restore 0.13.0

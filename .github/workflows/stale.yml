@@ -1,0 +1,40 @@
+# Marks inactive issues and pull requests as stale, then closes them.
+name: 🧹 Stale Issues
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Daily at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    # One place for the timings; the messages below quote them.
+    env:
+      DAYS_BEFORE_STALE: 60
+      DAYS_BEFORE_CLOSE: 14
+    steps:
+      - uses: actions/stale@v11
+        with:
+          stale-issue-message: |
+            👋 This issue has been automatically marked as stale because it has not had recent activity.
+            It will be closed in ${{ env.DAYS_BEFORE_CLOSE }} days if no further activity occurs.
+          stale-pr-message: |
+            👋 This PR has been automatically marked as stale because it has not had recent activity.
+            It will be closed in ${{ env.DAYS_BEFORE_CLOSE }} days if no further activity occurs.
+          close-issue-message: |
+            🔒 This issue has been automatically closed due to inactivity. Feel free to reopen it if it is still relevant.
+          close-pr-message: |
+            🔒 This PR has been automatically closed due to inactivity. Feel free to reopen it to continue.
+          days-before-stale: ${{ env.DAYS_BEFORE_STALE }}
+          days-before-close: ${{ env.DAYS_BEFORE_CLOSE }}
+          stale-issue-label: 'stale'
+          stale-pr-label: 'stale'
+          # Privacy and leak reports never go stale.
+          exempt-issue-labels: 'pinned,security,critical'
+          exempt-pr-labels: 'pinned,security,critical'
+          operations-per-run: 100

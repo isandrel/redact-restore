@@ -1,0 +1,34 @@
+# Claude Code-generated, version-specific types (also under tests/e2e/probe)
+.claude-plugin/types/
+
+# Local Claude Code state: per-machine settings can hold plugin options and
+# paths; project skills under .claude/skills/ stay tracked
+.claude/settings.local.json
+.claude/worktrees/
+.claude/*.local.*
+
+# Secrets and private configuration; never commit real values or mappings
+.env
+.env.*
+.private-values*
+.private-rules*
+*.vault.json
+*-settings.local.json
+*.secrets.*
+
+# End-to-end test workspace and artifacts (transcripts, debug logs, screens)
+.live-test/
+tests/e2e/**/*.txt
+tests/e2e/**/*.jsonl
+*.debug.txt
+*.log
+
+# Tooling and OS noise
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# Local-only maintainer tools (personal-data scan); never pushed
+.local/

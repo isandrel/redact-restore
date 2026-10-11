@@ -1,0 +1,4 @@
+{
+  "description": "TypeScript privacy hooks",
+  "modules": ["./register.ts"]
+}

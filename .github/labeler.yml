@@ -1,0 +1,69 @@
+# Labels applied to pull requests by file path (actions/labeler).
+
+detector:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'hooks/detectors.ts'
+          - 'hooks/vendor/**'
+          - 'scripts/sync-gitleaks.ts'
+          - 'tests/unit/detectors.test.ts'
+          - 'tests/unit/gitleaks.test.ts'
+
+privacy-core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'hooks/register.ts'
+          - 'hooks/privacy.ts'
+          - 'hooks/matcher.ts'
+          - 'hooks/placeholder.ts'
+          - 'hooks/rules.ts'
+          - 'hooks/scan.ts'
+          - 'hooks/pane.tsx'
+
+restore-policy:
+  - changed-files:
+      - any-glob-to-any-file: 'hooks/policy.ts'
+
+status:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'hooks/status.ts'
+          - 'hooks/metrics.ts'
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.claude-plugin/**'
+          - 'hooks/hooks.json'
+          - 'hooks/config.ts'
+          - 'hooks/defaults.ts'
+          - 'types/**'
+
+testing:
+  - changed-files:
+      - any-glob-to-any-file: 'tests/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '*.md'
+          - 'docs/**'
+
+agent-skills:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.claude/skills/**'
+          - 'skills/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'package.json'
+          - 'bun.lock'
+          - 'tsconfig*.json'
+          - 'biome.json'
+          - 'dprint.json'
