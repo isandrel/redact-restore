@@ -16,7 +16,9 @@ if (!version || tag !== `v${version}`) {
 }
 
 const changelog = await Bun.file(`${root}CHANGELOG.md`).text();
-const heading = new RegExp(`^## ${version.replace(/\./g, '\\.')}(?:\\s|$)`, 'm');
+// Escape every regex metacharacter, backslash included, not only dots.
+const escaped = version.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+const heading = new RegExp(`^## ${escaped}(?:\\s|$)`, 'm');
 const start = changelog.search(heading);
 if (start === -1) {
   console.error(`release-notes: CHANGELOG.md has no "## ${version}" section`);
