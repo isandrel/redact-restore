@@ -80,7 +80,7 @@ flowchart TD
 
 ## 🚀 Features
 
-|                             |                                                                                                                                                                                                                                                                                           |
+| Feature                     | What it does                                                                                                                                                                                                                                                                              |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🎯 **Your own values**      | List names, codenames, hosts or any exact string. In a form: pick a label (`PROJECT` → `{{PRIVATE:PROJECT#…}}`) or set a fixed alias (`CODENAME_X`).                                                                                                                                      |
 | 🔎 **240+ detectors**       | 200+ API key and token formats (Anthropic, OpenAI, AWS, GitHub, Stripe, Google, …, including the [gitleaks](https://github.com/gitleaks/gitleaks) rule set), JWTs, private keys, passwords, cards, IBANs, and Chinese ID, mobile and company codes, with checksum and entropy validation. |
@@ -93,7 +93,7 @@ flowchart TD
 
 ## 🆚 Compared With
 
-|                                               | API gateway or proxy | One-way redaction hooks | **Redact Restore** |
+| Capability                                    | API gateway or proxy | One-way redaction hooks | **Redact Restore** |
 | --------------------------------------------- | :------------------: | :---------------------: | :----------------: |
 | Keeps the official Claude login and endpoint  |          ❌          |           ✅            |         ✅         |
 | Model never sees configured values            |          ✅          |           ✅            |         ✅         |
@@ -134,7 +134,7 @@ Update later with `claude plugin update redact-restore@redact-restore`. The plug
 
 ## 📚 Documentation
 
-|                                        |                                                                         |
+| Document                               | What it covers                                                          |
 | -------------------------------------- | ----------------------------------------------------------------------- |
 | [Configuration](docs/CONFIGURATION.md) | Every option, placeholder formats, labels and aliases, status fields    |
 | [Detectors](docs/DETECTORS.md)         | What is detected, how it is validated, how to turn detectors on or off  |
