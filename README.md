@@ -151,6 +151,10 @@ Redact Restore is **experimental**. It is tested live in the Claude Code CLI 2.1
 
 Contributions are welcome: new detectors, false-positive fixes, docs and tests. Read the [contributing guide](CONTRIBUTING.md), and report leaks privately through [SECURITY.md](SECURITY.md), never in a public issue. This project follows a [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## 🌐 Community
+
+Thanks to [LINUX DO](https://linux.do/) for supporting open-source developers and community sharing.
+
 ## 📄 License
 
 [GNU Affero General Public License v3.0](LICENSE). The vendored gitleaks rules in `hooks/vendor/` are MIT-licensed; see [hooks/vendor/LICENSE-gitleaks.txt](hooks/vendor/LICENSE-gitleaks.txt).
