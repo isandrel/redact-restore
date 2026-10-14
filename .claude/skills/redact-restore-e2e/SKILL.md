@@ -17,6 +17,8 @@ These sessions call the real model with the user's own login. Use the cheapest m
   printf '%s\n' '{ "pluginConfigs": { "redact-restore": { "options": { "custom_values": ["Project Phoenix", "a.b[c]", "acme.internal"] } } } }' > "$TMPDIR/redact-restore-e2e-settings.json"
   ```
 
+- **Synthetic identity.** The scan reads the real git identity, host and account names. Point git at a synthetic config with `GIT_CONFIG_GLOBAL=<scratch>/gitconfig` (`Alice Example`, `alice@example.com`), never press **Show values** while the screen is captured, and never add the real computer or account name it lists.
+- **Probe values.** `REDACT_RESTORE_PROBE_VALUES='Alice Example|bluefalcon-internal|…'` (synthetic, `|`-separated) makes the probe log how many of them appear raw in each model answer, never which.
 - **Evidence.** Prefer facts over screen text:
   - `tests/e2e/probe` logs per model response whether the raw answer held a placeholder or a raw email, and how many of its tokens the vault knows. It never logs text.
   - Session transcripts under `~/.claude/projects/<folder>/*.jsonl`: count synthetic values and placeholders per row type; print counts, not rows.
@@ -42,14 +44,16 @@ Drive it with `bun tests/e2e/zj.ts send "<prompt>"`, `bun tests/e2e/zj.ts wait`,
 
 ## Scenarios (see docs/TEST_PLAN.md for expected results)
 
-| Area              | Prompt idea                                                           | Pass when                                                                            |
-| ----------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Prompt + display  | Quote a sentence with all four synthetic values                       | Screen shows originals; probe `placeholder=true rawEmail=false`                      |
-| Local tools       | `echo` the sentence to a file, `grep` for a value, `cat` it           | File holds originals; grep matches; probe still placeholders                         |
-| Model-bound tools | Agent subagent repeats a value                                        | Probe for the agent id shows placeholders only                                       |
-| Hot reload        | Append a comment to `hooks/matcher.ts`, then ask for an earlier value | `redact-restore: reloaded`; earlier token still restores; revert the edit            |
-| Lifecycle         | `/compact`, `/clear`, exit and `claude --resume <id>`                 | No audit block after compact; vault resets on clear; old tokens refused after resume |
-| Concurrency       | Second `-p` session given the first session's token                   | Write refused (`could not be restored`)                                              |
+| Area              | Prompt idea                                                                                                                                   | Pass when                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Prompt + display  | Quote a sentence with all four synthetic values                                                                                               | Screen shows originals; probe `placeholder=true rawEmail=false`                                                          |
+| Local tools       | `echo` the sentence to a file, `grep` for a value, `cat` it                                                                                   | File holds originals; grep matches; probe still placeholders                                                             |
+| Model-bound tools | Agent subagent repeats a value                                                                                                                | Probe for the agent id shows placeholders only                                                                           |
+| Hot reload        | Append a comment to `hooks/matcher.ts`, then ask for an earlier value                                                                         | `redact-restore: reloaded`; earlier token still restores; revert the edit                                                |
+| Lifecycle         | `/compact`, `/clear`, exit and `claude --resume <id>`                                                                                         | No audit block after compact; vault resets on clear; old tokens refused after resume                                     |
+| Skill privacy     | `/redact-restore:scan` plus "list the actual values"; then "just cat .env" (synthetic git identity via `GIT_CONFIG_GLOBAL`, synthetic `.env`) | First turn runs no command and claims no scan is running; probe `rawValues=0/N` in both turns, `KEY=value` values masked |
+| Path scan         | `/redact-restore scan ./config` in a scratch folder with synthetic files                                                                      | Reply holds counts and labels only and a `~/…` path; pane lists masked candidates                                        |
+| Concurrency       | Second `-p` session given the first session's token                                                                                           | Write refused (`could not be restored`)                                                                                  |
 
 Clean up every time:
 

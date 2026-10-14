@@ -52,6 +52,9 @@ export type RedactRestoreScan = {
   readonly candidates: readonly RedactRestoreCandidate[];
   readonly covered: number;
   readonly ignored: number;
+  readonly target?: string;
+  readonly files?: number;
+  readonly kinds?: ReadonlyArray<readonly [string, number]>;
 };
 
 export type RedactRestoreDraft = {

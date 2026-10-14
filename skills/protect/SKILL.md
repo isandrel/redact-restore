@@ -7,11 +7,15 @@ description: "Set up Redact Restore so private values (names, customers, codenam
 
 Redact Restore replaces private values with placeholders such as `{{PRIVATE:NAME#3fa1c09e8b2d}}` before anything is sent to the model API. The user sees the originals on screen, and local tools (Bash, Edit, Write, local MCP) receive the originals.
 
-You only ever see placeholders. Never ask the user to type, paste or confirm a private value in chat: chat text reaches you before a rule for it exists.
+You only ever see placeholders. Deciding what is private happens on the user's machine, never in this conversation:
+
+- Never ask the user to type, paste or confirm a private value in chat: chat text reaches you before a rule for it exists.
+- Never read files or run commands to find or judge private values; ask the user to run the local scan instead (see the `scan` skill).
+- You cannot run slash commands; ask the user to run them, and never say one is running.
 
 ## Steps to give the user
 
-1. **Find candidates.** Ask the user to run `/redact-restore scan`. It checks the git identity, remotes and recent authors, the computer and account names, `.env` files and the package author. The command output shows counts only. The values appear only in the Redact Restore pane, where the user picks **Add** or **Ignore**.
+1. **Find candidates.** Ask the user to run `/redact-restore scan` (this machine and project) or `/redact-restore scan PATH` (any folder or file). It runs locally; the command output shows counts only, and the values appear only in the Redact Restore pane, where the user picks **Add** or **Ignore**.
 2. **Add their own values.** Ask the user to run `/redact-restore rules` and fill in the **Add a rule** form in the pane:
    - **Private value**: for example `Acme Corp`.
    - **Replace with**: a placeholder with a label (pick one such as `CUSTOMER`, or **Other label…**), or a fixed alias such as `CLIENT_A`.
@@ -24,7 +28,7 @@ You only ever see placeholders. Never ask the user to type, paste or confirm a p
 
 ## What is covered
 
-Covered: prompts, CLAUDE.md and the account email, mentioned files and reminders, the system prompt, and every tool result. Built-in detectors also mask emails, more than 200 API key formats, private keys, JWTs, passwords, cards, IBANs and Chinese ID numbers.
+Covered: prompts, CLAUDE.md and the account email, mentioned files and reminders, the system prompt, and every tool result. Built-in detectors also mask `KEY=value` settings (as in `.env` files), emails, more than 200 API key formats, private keys, JWTs, passwords, cards, IBANs and Chinese ID numbers.
 
 Not covered: images and PDFs are withheld unless the user allows them, because they cannot be scanned. Other installed mods can read the session's state.
 

@@ -5,7 +5,7 @@ description: "Diagnose Redact Restore problems: a value that was not masked, a b
 
 # Troubleshoot Redact Restore
 
-Start by asking the user to run `/redact-restore status` and share its output. It holds counts only. Never ask for the value itself.
+Start by asking the user to run `/redact-restore status` and share its output. It holds counts only. Never ask for the value itself, and never read files or run commands to find it: checking whether something is private happens on the user's machine (`/redact-restore scan PATH`, the pane), not in this conversation.
 
 | Symptom                                                                     | Likely cause                                                                                                                     | Fix                                                                                                                  |
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |

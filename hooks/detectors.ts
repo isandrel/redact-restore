@@ -9,7 +9,13 @@
  * PEM, connection strings, assignments), maskit (Chinese ID, mobile, USCC,
  * Chinese assignment keywords), Presidio (Luhn, IBAN).
  */
-import { KEYWORD_RESCAN_LIMIT, KEYWORD_WINDOW_AFTER, KEYWORD_WINDOW_BEFORE } from './defaults.ts';
+import {
+  KEYWORD_RESCAN_LIMIT,
+  KEYWORD_WINDOW_AFTER,
+  KEYWORD_WINDOW_BEFORE,
+  MIN_CUSTOM_VALUE_LENGTH,
+  TRIVIAL_VALUE,
+} from './defaults.ts';
 import { GITLEAKS_ALLOW, GITLEAKS_RULES, GITLEAKS_STOPWORDS, type GitleaksRule } from './vendor/gitleaks-rules.ts';
 
 export interface Span {
@@ -48,6 +54,49 @@ function spans(
     if (value && accept(value, match))
       found.push({ start: match.index + offset, end: match.index + offset + value.length });
     if (match[0].length === 0) pattern.lastIndex += 1;
+  }
+  return found;
+}
+
+// `KEY=value` lines with an upper-case key, as in .env files, shell exports and Dockerfiles.
+const ENV_LINE = /^[ \t]*(?:export[ \t]+)?([A-Z][A-Z0-9_]{1,63})[ \t]*=[ \t]*([^\r\n]*)$/gm;
+
+/** A value worth hiding: not empty, trivial (`true`, `8080`), a reference (`${HOME}`) or a placeholder. */
+function envValueWorthMasking(value: string): boolean {
+  return (
+    value.length >= MIN_CUSTOM_VALUE_LENGTH &&
+    !TRIVIAL_VALUE.test(value) &&
+    !/^\$\{?[A-Za-z_]/.test(value) &&
+    !value.includes('{{') &&
+    !/^<[^>]*>$/.test(value)
+  );
+}
+
+/**
+ * Every `KEY=value` assignment's value, quotes and trailing comments removed:
+ * the env detector masks them, and a path scan lists them.
+ */
+export function envAssignments(text: string): Array<{ key: string; value: string; start: number; end: number }> {
+  if (!text.includes('=')) return [];
+  const found: Array<{ key: string; value: string; start: number; end: number }> = [];
+  ENV_LINE.lastIndex = 0;
+  for (let match = ENV_LINE.exec(text); match; match = ENV_LINE.exec(text)) {
+    const raw = match[2] ?? '';
+    const rawStart = match.index + match[0].length - raw.length;
+    let start = rawStart;
+    let end = rawStart + raw.length;
+    const quote = raw.charAt(0);
+    const close = quote === '"' || quote === "'" ? raw.indexOf(quote, 1) : -1;
+    if (close > 0) {
+      start = rawStart + 1;
+      end = rawStart + close;
+    } else {
+      const comment = raw.search(/\s#/);
+      if (comment >= 0) end = rawStart + comment;
+      while (end > start && /\s/.test(text.charAt(end - 1))) end -= 1;
+    }
+    const value = text.slice(start, end);
+    if (envValueWorthMasking(value)) found.push({ key: match[1] ?? '', value, start, end });
   }
   return found;
 }
@@ -403,6 +452,17 @@ export const DETECTORS: readonly Detector[] = [
       value => credentialValue(value, 3),
     ),
     rank: 3,
+  },
+
+  // Configuration values: a value written as KEY=value is masked whatever the key,
+  // so a .env file read by a tool never reaches the model in the clear.
+  {
+    id: 'env_assignment',
+    label: 'ENV',
+    groups: ['secrets'],
+    defaultOn: true,
+    rank: 3,
+    find: text => envAssignments(text).map(({ start, end }) => ({ start, end })),
   },
 
   // Personal data with check digits (on by default).

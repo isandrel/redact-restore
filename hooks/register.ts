@@ -9,6 +9,7 @@ import {
   PANE_ID,
   PANE_TITLE,
   SCAN_LOG_AUTHORS,
+  SCAN_MAX_DEPTH,
   SCAN_MAX_FILE_BYTES,
   SCAN_TIMEOUT_MS,
 } from './defaults.ts';
@@ -48,7 +49,16 @@ import {
   upsertRule,
   type StoredRule,
 } from './rules.ts';
-import { collectCandidates, countByLabel, isEnvFile, triage, type ScanCandidate } from './scan.ts';
+import {
+  assignedValues,
+  collectCandidates,
+  countByLabel,
+  fileCandidates,
+  isEnvFile,
+  maskedKinds,
+  triage,
+  type ScanCandidate,
+} from './scan.ts';
 import { formatStatus, statusFileContent, statusStats } from './status.ts';
 import { combine, emptyMetrics, metricsChange, type Metrics, type MetricsChange } from './metrics.ts';
 import { CUSTOM_LABEL, EMAIL_LABEL } from './placeholder.ts';
@@ -346,6 +356,102 @@ async function scanNow($: EngineInterface, ctx: Context): Promise<ScanView> {
     envFiles,
     ...(packageJson ? { packageJson } : {}),
   });
+  const ignored = await ignoredFingerprints($);
+  const result = await triage(found, matchingFor(ctx, await loadRules($)), ignored);
+  await update($, scanResult, () => result);
+  return result;
+}
+
+/**
+ * Reads the text files under a folder (or one file) for a path scan: skipped
+ * folders, binary files and files over the size limit are left out. Nothing
+ * read here is sent anywhere; the caller keeps candidates in the pane's state.
+ */
+async function readTextFiles(
+  $: EngineInterface,
+  ctx: Context,
+  root: string,
+): Promise<Array<{ name: string; text: string }>> {
+  const files: Array<{ name: string; text: string }> = [];
+  const { skipDirs, maxFiles } = ctx.config.scan;
+  const addFile = async (path: string, name: string) => {
+    try {
+      const text = String(await $.fs.read(path));
+      if (!text.slice(0, 1024).includes('\u0000')) files.push({ name, text });
+    } catch {
+      // Unreadable files are skipped.
+    }
+  };
+  const walk = async (dir: string, prefix: string, depth: number): Promise<void> => {
+    let entries: readonly { name: string; kind: string; size: number }[];
+    try {
+      entries = await $.fs.list(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (files.length >= maxFiles) return;
+      const path = `${dir}/${entry.name}`;
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.kind === 'dir') {
+        if (depth < SCAN_MAX_DEPTH && !skipDirs.includes(entry.name)) await walk(path, name, depth + 1);
+      } else if (entry.kind === 'file' && entry.size <= SCAN_MAX_FILE_BYTES) {
+        await addFile(path, name);
+      }
+    }
+  };
+  let isDir = true;
+  try {
+    await $.fs.list(root);
+  } catch {
+    isDir = false;
+  }
+  if (isDir) await walk(root.replace(/[\\/]+$/, '') || root, '', 0);
+  else await addFile(root, root.split(/[\\/]/).pop() ?? root);
+  return files;
+}
+
+/** Scans a folder or file on this machine: new candidates to the pane, counts by label to the caller. */
+async function scanPath($: EngineInterface, ctx: Context, target: string): Promise<ScanView> {
+  const home = await homeDir($);
+  const root = expandHome(target, home);
+  const files = await readTextFiles($, ctx, root);
+  const matching = matchingFor(ctx, await loadRules($));
+  const ignored = await ignoredFingerprints($);
+  const envOn = ctx.config.detectorIds.includes('env_assignment');
+  const assigned = assignedValues(files);
+  const result: ScanView = {
+    ...(await triage(fileCandidates(files), matching, ignored, candidate => envOn && assigned.has(candidate.value))),
+    target: displayPath(root, home),
+    files: files.length,
+    kinds: maskedKinds(files, matching),
+  };
+  await update($, scanResult, () => result);
+  return result;
+}
+
+/** Scan again what was scanned last: the same folder, or this machine. */
+async function rescan($: EngineInterface, ctx: Context): Promise<void> {
+  const last = await read($, scanResult);
+  if (last?.target) await scanPath($, ctx, expandHome(last.target, await homeDir($)));
+  else await scanNow($, ctx);
+}
+
+/** What a scan tells the model: counts by label, and the path as shown (`~/…`); never a value. */
+function scanSummary(result: ScanView): string {
+  const where = result.target ? `Scan of ${result.target} (${result.files ?? 0} file(s) read)` : 'Scan';
+  const masked = result.kinds?.length
+    ? ` Already masked in these files: ${result.kinds.map(([label, count]) => `${count} ${label}`).join(', ')}.`
+    : '';
+  return (
+    `${where} found ${result.candidates.length} new candidate(s)` +
+    (result.candidates.length ? ` (${countByLabel(result.candidates)})` : '') +
+    `; ${result.covered} already masked, ${result.ignored} ignored before.${masked} ` +
+    'Review them in the Redact Restore pane. Values are shown only there, on this machine.'
+  );
+}
+
+async function ignoredFingerprints($: EngineInterface): Promise<Set<string>> {
   const ignored = new Set<string>();
   try {
     for (const key of await $.store.keys())
@@ -353,9 +459,7 @@ async function scanNow($: EngineInterface, ctx: Context): Promise<ScanView> {
   } catch {
     // An unreadable ignore list shows every candidate again.
   }
-  const result = await triage(found, matchingFor(ctx, await loadRules($)), ignored);
-  await update($, scanResult, () => result);
-  return result;
+  return ignored;
 }
 
 async function ignoreCandidate($: EngineInterface, candidate: ScanCandidate): Promise<void> {
@@ -758,14 +862,9 @@ export const register: Register = (on, options) => {
           await openPane($, 'rules');
           return { text: 'Redact Restore rules pane opened.' };
         case 'scan': {
-          const result = await scanNow($, ctx);
+          const result = rest ? await scanPath($, ctx, rest) : await scanNow($, ctx);
           await openPane($, 'scan');
-          return {
-            text:
-              `Scan found ${result.candidates.length} new candidate(s)` +
-              (result.candidates.length ? ` (${countByLabel(result.candidates)})` : '') +
-              `; ${result.covered} already masked, ${result.ignored} ignored before. Review them in the Redact Restore pane.`,
-          };
+          return { text: scanSummary(result) };
         }
         case 'session':
           await openPane($, 'session');
@@ -820,7 +919,7 @@ export const register: Register = (on, options) => {
             draft: draftFrom(rule, labels),
           }).catch(ignore),
         remove: value => void deleteRule($, value).catch(() => setNotice($, MESSAGES.saveFailed)),
-        scan: () => void scanNow($, ctx).catch(() => setNotice($, MESSAGES.scanFailed)),
+        scan: () => void rescan($, ctx).catch(() => setNotice($, MESSAGES.scanFailed)),
         accept: candidate => void acceptCandidates($, ctx, [candidate]).catch(() => setNotice($, MESSAGES.saveFailed)),
         acceptAll: () => void acceptAll($, ctx).catch(() => setNotice($, MESSAGES.saveFailed)),
         ignore: candidate => void ignoreCandidate($, candidate).catch(() => setNotice($, MESSAGES.saveFailed)),

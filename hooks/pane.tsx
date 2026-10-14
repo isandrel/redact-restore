@@ -108,6 +108,10 @@ export interface ScanView {
   readonly covered: number;
   /** Found values dismissed before. */
   readonly ignored: number;
+  /** A path scan: the folder or file as shown (`~/…`), files read, and values already masked by label. */
+  readonly target?: string;
+  readonly files?: number;
+  readonly kinds?: ReadonlyArray<readonly [string, number]>;
 }
 
 export interface PaneData {
@@ -300,7 +304,8 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
           <Box flexDirection="column">
             <Text>
               Scan looks at the git identity, remotes and recent authors, this computer's name, your account name, .env
-              files and the package author. Results stay in this pane.
+              files and the package author; /redact-restore scan PATH checks a folder or file. Everything runs on this
+              machine, and results stay in this pane.
             </Text>
             <Button key="scan-run" variant="primary" onPress={() => act.scan()}>
               Scan now
@@ -308,9 +313,17 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
           </Box>
         ) : (
           <Box flexDirection="column">
+            {scan.target ? (
+              <Text dimColor>
+                {scan.target} · {scan.files ?? 0} file(s) read
+              </Text>
+            ) : null}
             <Text dimColor>
               {scan.candidates.length} new · {scan.covered} already masked · {scan.ignored} ignored before
             </Text>
+            {scan.kinds && scan.kinds.length > 0 ? (
+              <Text dimColor>Already masked in these files: {tally(scan.kinds)}</Text>
+            ) : null}
             <Box flexDirection="row" gap={1}>
               <Button key="scan-again" onPress={() => act.scan()}>
                 Scan again

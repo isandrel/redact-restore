@@ -71,6 +71,29 @@ export const PREVIEW_DOTS = 4;
 export const SCAN_TIMEOUT_MS = 5000;
 export const SCAN_LOG_AUTHORS = 200;
 export const SCAN_MAX_FILE_BYTES = 262_144;
+/** A path scan reads at most this many text files, this many folders deep. */
+export const SCAN_MAX_FILES = 2000;
+/** The most `scan_max_files` may ask for. */
+export const SCAN_FILES_CEILING = 20_000;
+export const SCAN_MAX_DEPTH = 8;
+/** Folders a path scan skips: dependencies, build output, version control. */
+export const SCAN_SKIP_DIRS: readonly string[] = [
+  '.git',
+  'node_modules',
+  '.venv',
+  'venv',
+  '__pycache__',
+  'dist',
+  'build',
+  'target',
+  'vendor',
+  '.next',
+  'coverage',
+  '.cache',
+];
+/** Host names on private networks: candidates a path scan offers as HOST. */
+export const INTERNAL_HOST =
+  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:internal|corp|intranet|lan|private|localdomain|home\.arpa)\b/gi;
 /** Code hosts whose names are public; their owners are still candidates. */
 export const PUBLIC_GIT_HOSTS: readonly string[] = [
   'github.com',

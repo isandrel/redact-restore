@@ -9,12 +9,14 @@ import {
   ENV_EXAMPLE,
   ENV_FILE,
   GENERIC_ACCOUNTS,
+  INTERNAL_HOST,
   LOCAL_HOST_SUFFIX,
   MIN_CUSTOM_VALUE_LENGTH,
   PUBLIC_GIT_HOSTS,
   SECRET_KEY,
   TRIVIAL_VALUE,
 } from './defaults.ts';
+import { envAssignments } from './detectors.ts';
 import { findPrivateMatches, type MatchingOptions } from './matcher.ts';
 import { fingerprint, ruleKey } from './rules.ts';
 
@@ -174,6 +176,53 @@ export function collectCandidates(inputs: ScanInputs): ScanCandidate[] {
   return candidates;
 }
 
+/**
+ * Candidates in any text files (a path scan): `KEY=value` values and host names
+ * on private networks. Values masked anyway are counted, not offered, by `triage`.
+ */
+export function fileCandidates(
+  files: ReadonlyArray<{ readonly name: string; readonly text: string }>,
+): ScanCandidate[] {
+  const candidates: ScanCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (value: string, label: string, source: string) => {
+    const key = ruleKey(value);
+    if (value.length < MIN_CUSTOM_VALUE_LENGTH || seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ value, label, source });
+  };
+  for (const file of files) {
+    for (const { key, value } of envAssignments(file.text)) {
+      add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`);
+    }
+    for (const match of file.text.matchAll(INTERNAL_HOST)) add(match[0].toLowerCase(), 'HOST', file.name);
+  }
+  return candidates;
+}
+
+/** The KEY=value values in these files: masked wherever they appear as an assignment while the env detector is on. */
+export function assignedValues(files: ReadonlyArray<{ readonly text: string }>): Set<string> {
+  return new Set(files.flatMap(file => envAssignments(file.text).map(({ value }) => value)));
+}
+
+/** Distinct values the current rules and detectors already mask in these files, by label. */
+export function maskedKinds(
+  files: ReadonlyArray<{ readonly text: string }>,
+  matching: MatchingOptions,
+): Array<readonly [string, number]> {
+  const byLabel = new Map<string, Set<string>>();
+  for (const file of files) {
+    for (const match of findPrivateMatches(file.text, matching)) {
+      const values = byLabel.get(match.category) ?? new Set<string>();
+      values.add(match.value);
+      byLabel.set(match.category, values);
+    }
+  }
+  return [...byLabel.entries()]
+    .map(([label, values]) => [label, values.size] as const)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
 /** Candidates by label, for command output that must not carry values: `2 NAME, 1 HOST`. */
 export function countByLabel(candidates: readonly ScanCandidate[]): string {
   const counts = new Map<string, number>();
@@ -191,12 +240,14 @@ export async function triage(
   found: readonly ScanCandidate[],
   matching: MatchingOptions,
   ignored: ReadonlySet<string>,
+  /** Also masked in context (a KEY=value value the env detector hides), though not on its own. */
+  maskedInContext: (candidate: ScanCandidate) => boolean = () => false,
 ): Promise<{ candidates: ScanCandidate[]; covered: number; ignored: number }> {
   const candidates: ScanCandidate[] = [];
   let covered = 0;
   let dismissed = 0;
   for (const candidate of found) {
-    if (isMasked(candidate.value, matching)) covered += 1;
+    if (maskedInContext(candidate) || isMasked(candidate.value, matching)) covered += 1;
     else if (ignored.has(await fingerprint(candidate.value))) dismissed += 1;
     else candidates.push(candidate);
   }

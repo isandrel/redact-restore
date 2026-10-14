@@ -124,6 +124,18 @@
       "description": "Write counters and state (never values) to ~/.claude/redact-restore/status/<session_id>.json so a custom statusLine command can show them.",
       "default": false
     },
+    "scan_skip_dirs": {
+      "type": "string",
+      "title": "Folders a path scan skips",
+      "description": "Comma-separated folder names /redact-restore scan PATH skips, added to the built-in list (.git, node_modules, .venv, venv, __pycache__, dist, build, target, vendor, .next, coverage, .cache).",
+      "default": ""
+    },
+    "scan_max_files": {
+      "type": "number",
+      "title": "Files a path scan reads at most",
+      "description": "How many text files /redact-restore scan PATH reads before it stops (default 2000, at most 20000). Files over 256 KiB and binary files are skipped.",
+      "default": 2000
+    },
     "rule_labels": {
       "type": "string",
       "title": "Labels in the rule form",

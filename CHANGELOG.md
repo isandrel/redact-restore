@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Sensitive values are found and judged on your machine only. `/redact-restore scan PATH` checks any folder or file for `KEY=value` values and private host names, and counts what detectors already mask; the model receives counts and labels only. Skipped folders and the file limit are options (`scan_skip_dirs`, `scan_max_files`).
+- New default-on detector `env_assignment`: the value of a `KEY=value` line (as in `.env` files) is masked in everything sent to the model, so a settings file read by a tool no longer leaks names or hosts it holds.
+- Skills no longer let the model read files, run commands or ask for pasted values to judge what is private, and no longer claim a scan is running; they ask the user to run the local scan.
+- README: install command and a two-minute fake-email test at the top, a free-to-use note, and a short summary of what Redact Restore does not do.
+
 ## 0.1.0 - 2026-10-11
 
 First public release.

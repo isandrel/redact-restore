@@ -7,6 +7,8 @@ description: Guide for changing Redact Restore's behavior - adding a detector, a
 
 Goal of the mod: **the model API never receives private values; everything local works with the real ones.** Every change must keep that true and fail safe.
 
+Second rule: **what is private is decided on the user's machine, never by the model.** Scans, detectors and the rule form run locally; command output, tool results and skills give the model counts and labels only. Never add a feature or skill step that sends raw text to the model to classify, asks users to paste values, or lets the model read files to find them.
+
 ## Where things go
 
 | Change                                  | File                                         | Notes                                                                                                                                                                                                                                     |
@@ -21,7 +23,7 @@ Goal of the mod: **the model API never receives private values; everything local
 | User options                            | `.claude-plugin/plugin.json` `userConfig`    | `string` + `options` gives a `/config` picker; lists are comma-separated strings; secrets use `sensitive: true`                                                                                                                           |
 | Tunable defaults, user-facing text      | `hooks/defaults.ts`                          | Limits, tool lists, scan sources, store keys, messages. No magic values inline elsewhere                                                                                                                                                  |
 | Saved rules, import/export              | `hooks/rules.ts`                             | Pure. One store key per rule (`rule.<sha256>`); never put a value in a key or in command output                                                                                                                                           |
-| Scan sources                            | `hooks/scan.ts`                              | Pure; `register.ts` gathers inputs (git, hostname, files). Candidates go only to the pane                                                                                                                                                 |
+| Scan sources                            | `hooks/scan.ts`                              | Pure; `register.ts` gathers inputs (git, hostname, files, `scan PATH` folders). Candidates go only to the pane; the model gets counts and labels. Never add a path that asks the model to read or judge values                            |
 | Pane (rules, scan, session tabs)        | `hooks/pane.tsx`                             | Pure drawing from data + handler closures; values masked until **Show values**                                                                                                                                                            |
 | User skills shipped with the plugin     | `skills/<name>/SKILL.md`                     | End-user help only; never ask users to type values in chat                                                                                                                                                                                |
 | State shape                             | `types/index.d.ts`                           | Declare every `$.state` key under `redact-restore`                                                                                                                                                                                        |
@@ -38,8 +40,10 @@ The engine's own declarations are the authority, not memory or online examples: 
    - `tests/integration/`: the hook through the engine's dispatch. Register the test's hooks before the first `$` call; answer `$`-call events with `{ value }`.
 3. **Synthetic data only**, from `example.com`, `.test`, `.example`, `.internal` domains.
 4. **Docs.** Update the coverage table in `docs/SECURITY.md`, `docs/COMPATIBILITY.md` (mark new behavior "Kit only" until live-tested), the option table in `docs/CONFIGURATION.md`, the detector table in `docs/DETECTORS.md`, and `CHANGELOG.md`.
-5. **Model note.** If restoration or placeholder handling changes, update `placeholderSection` in `register.ts`, which tells the model what placeholders are.
-6. Run the `redact-restore-verify` skill; live-test with `redact-restore-e2e` before calling a path covered.
+5. **Configurable, not hard-coded.** Tunable values (limits, lists, patterns, messages) go in `hooks/defaults.ts`; anything a user may want to change becomes an option in `.claude-plugin/plugin.json` `userConfig`, parsed in `hooks/config.ts` with the built-in value as the default.
+6. **Skills.** If behavior a user sees changes, update the matching `skills/<name>/SKILL.md` (user-facing, shipped publicly: synthetic examples only, no personal names, paths or hosts).
+7. **Model note.** If restoration or placeholder handling changes, update `placeholderSection` in `register.ts`, which tells the model what placeholders are.
+8. Run the `redact-restore-verify` skill; live-test with `redact-restore-e2e` before calling a path covered.
 
 ## Known engine facts (2.1.287)
 

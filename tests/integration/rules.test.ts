@@ -8,7 +8,7 @@ type On = Parameters<TestBody>[1];
 const NAME = 'Alice Example';
 const HOST = 'git.acme.internal';
 const PLACEHOLDER = /\{\{PRIVATE:[A-Z_]+#[a-f0-9]{12}\}\}/;
-const HOME = '/home/alice';
+const HOME = '/home/user';
 
 interface World {
   prompt: string;
@@ -18,7 +18,14 @@ interface World {
 }
 
 /** Every stub the command, the pane and prompt.submit need; registered before the first $ call. */
-function world(on: On, store: Record<string, unknown> | 'broken' = {}, files: Record<string, string> = {}): World {
+type Entry = { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number; isLink: boolean };
+
+function world(
+  on: On,
+  store: Record<string, unknown> | 'broken' = {},
+  files: Record<string, string> = {},
+  tree: Record<string, Entry[]> = {},
+): World {
   const seen: World = { prompt: '', files: new Map(Object.entries(files)), opened: [], argv: [] };
   if (store === 'broken') {
     on('store.keys', () => ({ deny: 'store unreadable' }) as never);
@@ -26,7 +33,12 @@ function world(on: On, store: Record<string, unknown> | 'broken' = {}, files: Re
     on('store.set', () => ({ deny: 'store unreadable' }) as never);
   } else mock.store(on, store);
   mock.env(on, { HOME });
-  on('fs.list', () => ({ value: [{ name: '.env', kind: 'file', size: 40, mtimeMs: 0, isLink: false }] }) as never);
+  on('fs.list', ($, e) => {
+    const listed = Object.entries(tree).find(([dir]) => (e.path ?? '').endsWith(dir));
+    if (listed) return { value: listed[1] } as never;
+    if (Object.keys(tree).length > 0) return { deny: 'ENOTDIR' } as never;
+    return { value: [{ name: '.env', kind: 'file', size: 40, mtimeMs: 0, isLink: false }] } as never;
+  });
   on('fs.read', ($, e) => {
     const hit = [...seen.files.entries()].find(([path]) => e.path.endsWith(path));
     return (hit ? { value: hit[1] } : { deny: 'ENOENT' }) as never;
@@ -309,6 +321,51 @@ describe('scan', () => {
     await pane.press({ key: 'ignore-0' });
     await eventually(async () => /1 ignored before/.test(await run($, 'scan')));
     expect(first).not.toMatch(/1 ignored before/);
+  });
+});
+
+describe('path scan', () => {
+  const file = (name: string, size = 60): Entry => ({ name, kind: 'file', size, mtimeMs: 0, isLink: false });
+  const dir = (name: string): Entry => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false });
+
+  test('reads text files under a folder on this machine; the reply holds counts and labels only', async ($, on) => {
+    const seen = world(
+      on,
+      {},
+      {
+        '/home/user/proj/config/app.env': 'TEAM_CODENAME=bluefalcon-internal\n',
+        '/home/user/proj/docs/setup.md': 'Connect to build.acme.internal.\n',
+        '/home/user/proj/node_modules/pkg/x.env': 'LEAK=never-read-this\n',
+        '/home/user/proj/big.bin': 'binary\u0000data',
+      },
+      {
+        '/home/user/proj': [
+          dir('config'),
+          dir('docs'),
+          dir('node_modules'),
+          file('big.bin'),
+          file('huge.txt', 10_000_000),
+        ],
+        '/home/user/proj/config': [file('app.env')],
+        '/home/user/proj/docs': [file('setup.md')],
+        '/home/user/proj/node_modules': [dir('pkg')],
+        '/home/user/proj/node_modules/pkg': [file('x.env')],
+      },
+    );
+    const text = await run($, 'scan ~/proj');
+    expect(text).toBe(
+      'Scan of ~/proj (2 file(s) read) found 1 new candidate(s) (1 HOST); 1 already masked, 0 ignored before. ' +
+        'Already masked in these files: 1 ENV. Review them in the Redact Restore pane. Values are shown only there, on this machine.',
+    );
+    for (const value of ['bluefalcon-internal', 'build.acme.internal', '/home/user']) expect(text).not.toContain(value);
+    expect(seen.opened).toEqual(['redact-restore']);
+    const pane = await mountPane($, 'desktop');
+    const drawn = JSON.stringify(await pane.drawn());
+    expect(drawn).toContain('~/proj');
+    expect(drawn).not.toContain('build.acme.internal');
+    await pane.press({ key: 'accept-0' });
+    await eventually(() => masks($, seen, 'build.acme.internal'));
+    expect(seen.prompt).toMatch(/\{\{PRIVATE:HOST#/);
   });
 });
 

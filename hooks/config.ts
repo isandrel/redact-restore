@@ -2,7 +2,7 @@ import { normalizeCustomValues, type MatchingOptions } from './matcher.ts';
 import { DEFAULT_POLICY, RESTORE_MODES, parsePatternList, type RestoreMode, type RestorePolicy } from './policy.ts';
 import { STATUS_LINES, type StatusLine } from './status.ts';
 import { selectDetectors } from './detectors.ts';
-import { RULE_LABELS } from './defaults.ts';
+import { RULE_LABELS, SCAN_FILES_CEILING, SCAN_MAX_FILES, SCAN_SKIP_DIRS } from './defaults.ts';
 import {
   createScheme,
   DEFAULT_FORMAT,
@@ -39,6 +39,8 @@ export interface RedactRestoreConfig {
   readonly statusFile: boolean;
   /** Labels offered in the pane's rule form (`rule_labels`, or the built-in list). */
   readonly ruleLabels: readonly string[];
+  /** A path scan's limits: folders it skips (built-ins plus `scan_skip_dirs`) and files it reads at most. */
+  readonly scan: { readonly skipDirs: readonly string[]; readonly maxFiles: number };
   readonly outboundAudit: boolean;
 }
 
@@ -118,6 +120,13 @@ export function parseConfig(options: RawOptions): RedactRestoreConfig {
     statusFormat: typeof options.status_format === 'string' ? options.status_format : '',
     statusFile: flag(options, 'status_file', false),
     ruleLabels: ruleLabels(options.rule_labels),
+    scan: {
+      skipDirs: [...new Set([...SCAN_SKIP_DIRS, ...patterns(options, 'scan_skip_dirs', [])])],
+      maxFiles:
+        typeof options.scan_max_files === 'number' && options.scan_max_files > 0
+          ? Math.min(Math.floor(options.scan_max_files), SCAN_FILES_CEILING)
+          : SCAN_MAX_FILES,
+    },
     outboundAudit: flag(options, 'outbound_audit', true),
   };
 }

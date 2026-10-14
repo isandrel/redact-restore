@@ -31,7 +31,7 @@ Run from the repository root. Report each step as passed or failed, with the sho
    claude plugin test .
    ```
 
-4. Personal data. Check the staged diff for real names, emails, home paths (`/Users/<name>/`), host names and tokens before committing; replace any with synthetic values (`alice@example.com`, `Project Phoenix`, `/path/to/...`). A maintainer may keep a local-only scanner in `.local/` (gitignored); run it when present.
+4. Personal data. Check the staged diff for real names, emails, home paths (`/Users/<name>/`), host names and tokens before committing; replace any with synthetic values (`alice@example.com`, `Project Phoenix`, `/path/to/...`). A maintainer may keep a local-only scanner in `.local/` (gitignored); run it when present. Everything tracked is published, including `skills/` and `.claude/skills/`: check them the same way.
 
 ## Rules
 
