@@ -8,6 +8,12 @@ Use Claude Code on private projects without handing your secrets to the model.<b
 
 [![CI](https://github.com/isandrel/redact-restore/actions/workflows/ci.yml/badge.svg)](https://github.com/isandrel/redact-restore/actions/workflows/ci.yml) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE) [![Claude Code Mod](https://img.shields.io/badge/Claude%20Code-Mod-d97757?style=flat-square)](https://code.claude.com) [![Status: experimental](https://img.shields.io/badge/status-experimental-orange?style=flat-square)](docs/SECURITY.md)
 
+```text
+/plugin install redact-restore --marketplace isandrel/redact-restore
+```
+
+**[🧪 Try it in 2 minutes with a fake email](#-try-it-in-2-minutes)**
+
 </div>
 
 ---
@@ -22,6 +28,36 @@ Redact Restore sits **inside** Claude Code as a native Mod:
 - 🔁 **You see the real thing.** Messages render with the original values on your screen.
 - 🧰 **Your tools still work.** `Bash`, `Edit`, `Write`, `Grep` and local MCP tools receive the real values, so builds, scripts and file edits are correct.
 - 🔑 **Nothing changes about your login.** Official Claude Pro/Max OAuth, no API gateway, no proxy, no custom base URL.
+- 💸 **Free and open source** ([AGPL-3.0](LICENSE)). No account, service or fee of its own: you only need the Claude Code you already use, on whatever Claude plan runs it.
+
+**What it does not do.** It is experimental, not a data-loss-prevention product. It hides only values it knows: your rules plus the [built-in detectors](docs/DETECTORS.md). Images and PDFs are withheld, not scanned. Local tools and other installed mods see real values by design. Details: [security model](docs/SECURITY.md).
+
+## 🧪 Try It in 2 Minutes
+
+No setup and no real data: email detection is on by default, so one fake address shows the whole round trip.
+
+**1. Install** at a Claude Code prompt, then start a new session:
+
+```text
+/plugin install redact-restore --marketplace isandrel/redact-restore
+```
+
+**2. Send this prompt:**
+
+```text
+My test email is alice@example.com. Spell it back one character at a time, then run: echo alice@example.com > redact-test.txt
+```
+
+**3. Check the result:**
+
+| Where                                      | You should see                                         | Which proves                            |
+| ------------------------------------------ | ------------------------------------------------------ | --------------------------------------- |
+| The reply on your screen                   | `alice@example.com`                                    | Placeholders are restored locally       |
+| The spelled-out characters                 | `{ { P R I V A T E : E M A I L # …`                    | The model only ever had the placeholder |
+| `cat redact-test.txt` in your own terminal | `alice@example.com`                                    | Local tools receive the original        |
+| `/redact-restore session`                  | One masked value of kind `EMAIL`, with its placeholder | What was masked this session            |
+
+**4. Tell us what happened.** Share what you saw in each row, and anything masked that should not be, through the [bug report](https://github.com/isandrel/redact-restore/issues/new?template=01-bug-report.yml) or [false positive](https://github.com/isandrel/redact-restore/issues/new?template=04-false-positive.yml) forms. Use fake data only.
 
 ## 🧭 How It Works
 
@@ -80,16 +116,16 @@ flowchart TD
 
 ## 🚀 Features
 
-| Feature                     | What it does                                                                                                                                                                                                                                                                              |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🎯 **Your own values**      | List names, codenames, hosts or any exact string. In a form: pick a label (`PROJECT` → `{{PRIVATE:PROJECT#…}}`) or set a fixed alias (`CODENAME_X`).                                                                                                                                      |
-| 🔎 **240+ detectors**       | 200+ API key and token formats (Anthropic, OpenAI, AWS, GitHub, Stripe, Google, …, including the [gitleaks](https://github.com/gitleaks/gitleaks) rule set), JWTs, private keys, passwords, cards, IBANs, and Chinese ID, mobile and company codes, with checksum and entropy validation. |
-| 🧱 **Defense in depth**     | Masks prompts, context, attachments, the system prompt and every stored row; audits each request before it is sent; withholds images it cannot scan.                                                                                                                                      |
-| 🔁 **Reversible by design** | Same value, same placeholder within a session. Restored on screen, optionally while streaming, and in local tool inputs. Unknown placeholders are refused, never guessed.                                                                                                                 |
-| ⚙️ **Configurable**          | Placeholder format, which tools get originals, which detectors run, status line content: all options, all with safe defaults.                                                                                                                                                             |
-| 🗂️ **Rules pane and scan**   | `/redact-restore rules` to add, update or remove values; `/redact-restore scan` to find your name, coworkers, hosts and `.env` values locally; import and export to move them between machines. Values are shown only on your screen, masked until you ask.                               |
-| 📊 **Visible**              | A status line such as `4 private values masked`, a **Session** tab with this session's counts and placeholders, a template, and a status file your own `statusLine` script can read (counts only, never values).                                                                          |
-| 🧪 **Tested**               | Unit and integration suites through the engine's own dispatch, live tests in a real Claude Code session, and a regression test for every reviewed leak.                                                                                                                                   |
+| Feature                     | What it does                                                                                                                                                                                                                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 🎯 **Your own values**      | List names, codenames, hosts or any exact string. In a form: pick a label (`PROJECT` → `{{PRIVATE:PROJECT#…}}`) or set a fixed alias (`CODENAME_X`).                                                                                                                                                   |
+| 🔎 **240+ detectors**       | 200+ API key and token formats (Anthropic, OpenAI, AWS, GitHub, Stripe, Google, …, including the [gitleaks](https://github.com/gitleaks/gitleaks) rule set), JWTs, private keys, passwords, cards, IBANs, and Chinese ID, mobile and company codes, with checksum and entropy validation.              |
+| 🧱 **Defense in depth**     | Masks prompts, context, attachments, the system prompt and every stored row; audits each request before it is sent; withholds images it cannot scan.                                                                                                                                                   |
+| 🔁 **Reversible by design** | Same value, same placeholder within a session. Restored on screen, optionally while streaming, and in local tool inputs. Unknown placeholders are refused, never guessed.                                                                                                                              |
+| ⚙️ **Configurable**          | Placeholder format, which tools get originals, which detectors run, status line content: all options, all with safe defaults.                                                                                                                                                                          |
+| 🗂️ **Rules pane and scan**   | `/redact-restore rules` to add, update or remove values; `/redact-restore scan [PATH]` to find your name, coworkers, hosts and settings values locally, on this machine or in any folder; import and export to move them between machines. Values are shown only on your screen, masked until you ask. |
+| 📊 **Visible**              | A status line such as `4 private values masked`, a **Session** tab with this session's counts and placeholders, a template, and a status file your own `statusLine` script can read (counts only, never values).                                                                                       |
+| 🧪 **Tested**               | Unit and integration suites through the engine's own dispatch, live tests in a real Claude Code session, and a regression test for every reviewed leak.                                                                                                                                                |
 
 ## 🆚 Compared With
 
@@ -122,7 +158,7 @@ claude plugin install redact-restore@redact-restore
 
 **2. Tell it what is private**, without typing values in chat:
 
-- `/redact-restore scan` finds your git identity, coworkers, remotes, machine and account names, and `.env` values. Pick **Add** or **Ignore** in the pane.
+- `/redact-restore scan` finds your git identity, coworkers, remotes, machine and account names, and `.env` values; `/redact-restore scan PATH` checks any folder or file. It runs on your machine, so nothing is sent to the model to judge. Pick **Add** or **Ignore** in the pane.
 - `/redact-restore rules` adds your own in a form: the private value (`Acme Corp`), then a label (`CUSTOMER`) or a fixed alias (`CLIENT_A`), with a preview of what the model sees.
 - For your most sensitive values, use the keychain instead: `/plugin` → **Installed** → **redact-restore** → **Configure options** → **Exact private values**.
 
