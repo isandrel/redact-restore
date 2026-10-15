@@ -348,9 +348,11 @@ async function displayVault($: EngineInterface): Promise<Vault> {
   try {
     const id = await $.session.id();
     if (drawnMap?.id !== id) {
+      // Remembered per session, found or not: a missing file is not read again on every draw.
+      drawnMap = { id, vault: {} };
       const path = await sessionMapPath($);
-      const saved = path ? parseSessionMap(String(await $.fs.read(path))) : undefined;
-      drawnMap = { id, vault: saved?.vault ?? {} };
+      const saved = path ? parseSessionMap(String(await $.fs.read(path).catch(() => ''))) : undefined;
+      if (saved) drawnMap = { id, vault: saved.vault };
     }
     return drawnMap.vault;
   } catch {
@@ -718,6 +720,8 @@ async function readTextFiles(
       return;
     }
     for (const entry of entries) {
+      // Skipped folders and other kinds are never looked at: they do not make a scan partial.
+      if (entry.kind === 'dir' ? skipDirs.includes(entry.name) : entry.kind !== 'file') continue;
       if (seen >= maxFiles || dirs > SCAN_MAX_DIRS) {
         partial = true;
         return;
@@ -725,7 +729,6 @@ async function readTextFiles(
       const path = `${dir}/${entry.name}`;
       const name = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.kind === 'dir') {
-        if (skipDirs.includes(entry.name)) continue;
         if (depth < SCAN_MAX_DEPTH) await walk(path, name, depth + 1);
         else partial = true;
       } else if (entry.kind === 'file') {

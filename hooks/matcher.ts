@@ -184,11 +184,28 @@ interface KnownIndex {
   readonly tokens?: RegExp;
 }
 
+/** A 53-bit hash with the length (cyrb53): a cache key for text, not a security hash. */
+export function textHash(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${text.length}:${(2097151 & h2) * 4294967296 + (h1 >>> 0)}`;
+}
+
 const segmentCache = new Map<string, RegExp>();
 
-/** One segment's alternation, cached by position and content; least recently used first out. */
+/**
+ * One segment's alternation, cached by its whole content (another vault may hold
+ * other values at the same positions); least recently used first out.
+ */
 function segment(values: readonly string[], start: number, end: number): RegExp {
-  const key = `${start}\u0000${end}\u0000${values[start]}\u0000${values[end - 1]}`;
+  const key = textHash(values.slice(start, end).join('\u0000'));
   let pattern = segmentCache.get(key);
   if (pattern) segmentCache.delete(key);
   else pattern = compileLiterals(values.slice(start, end), false);
@@ -223,7 +240,11 @@ function segments(values: readonly string[]): RegExp[] {
 // Lookups derived from one known list (the vault view caches the list itself).
 const knownLookups = new WeakMap<
   readonly KnownValue[],
-  { readonly values: readonly string[]; readonly category: ReadonlyMap<string, PrivacyCategory> }
+  {
+    readonly values: readonly string[];
+    readonly category: ReadonlyMap<string, PrivacyCategory>;
+    segments?: readonly RegExp[];
+  }
 >();
 const tokenPatterns = new WeakMap<readonly string[], { readonly format: string; readonly pattern?: RegExp }>();
 
@@ -243,8 +264,10 @@ function knownIndex(known: readonly KnownValue[], tokens: readonly string[], sch
     literal = { format: scheme.format, ...(others.length ? { pattern: compileLiterals(others, false) } : {}) };
     tokenPatterns.set(tokens, literal);
   }
+  // Segments are hashed once per known list, not once per text.
+  lookup.segments ??= lookup.values.length ? segments(lookup.values) : [];
   return {
-    values: lookup.values.length ? segments(lookup.values) : [],
+    values: lookup.segments,
     category: lookup.category,
     ...(literal.pattern ? { tokens: literal.pattern } : {}),
   };
@@ -275,6 +298,105 @@ function compileLiterals(values: readonly string[], caseInsensitive: boolean): R
   return new RegExp(sorted.map(escapeRegExp).join('|'), caseInsensitive ? 'giu' : 'gu');
 }
 
+type Range = { readonly start: number; readonly end: number };
+
+/** Sorted, non-overlapping ranges. */
+function mergeRanges(ranges: readonly Range[]): Range[] {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged: Range[] = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end)
+      merged[merged.length - 1] = { start: last.start, end: Math.max(last.end, range.end) };
+    else merged.push(range);
+  }
+  return merged;
+}
+
+/** The text with each range replaced by `x` of the same length: offsets stay the same. */
+function blankRanges(text: string, ranges: readonly Range[]): string {
+  const parts: string[] = [];
+  let last = 0;
+  for (const range of ranges) {
+    parts.push(text.slice(last, range.start), 'x'.repeat(range.end - range.start));
+    last = range.end;
+  }
+  parts.push(text.slice(last));
+  return parts.join('');
+}
+
+/**
+ * Candidates with placeholder ranges cut out. A configured or known value that
+ * touches a placeholder is dropped, as before; a detector's match keeps its
+ * parts outside placeholders that are long enough to be a value. Candidates
+ * arrive sorted by start, so one pointer walks the ranges.
+ */
+function outsideRanges(candidates: readonly PrivateMatch[], ranges: readonly Range[], text: string): PrivateMatch[] {
+  const kept: PrivateMatch[] = [];
+  let first = 0;
+  for (const candidate of candidates) {
+    while (first < ranges.length && (ranges[first]?.end ?? 0) <= candidate.start) first += 1;
+    if (first >= ranges.length || (ranges[first]?.start ?? Infinity) >= candidate.end) {
+      kept.push(candidate);
+      continue;
+    }
+    if (candidate.priority === 0) continue;
+    let cursor = candidate.start;
+    const piece = (start: number, end: number) => {
+      if (end - start >= MIN_CUSTOM_VALUE_LENGTH)
+        kept.push({ ...candidate, start, end, value: text.slice(start, end) });
+    };
+    for (let index = first; index < ranges.length && (ranges[index]?.start ?? Infinity) < candidate.end; index += 1) {
+      const range = ranges[index] as Range;
+      piece(cursor, Math.min(range.start, candidate.end));
+      cursor = Math.max(cursor, range.end);
+    }
+    piece(cursor, candidate.end);
+  }
+  return kept;
+}
+
+/** For each outranked label, the winners' starts and the furthest end so far: overlap tests by binary search. */
+function winnersByLabel(
+  winners: readonly PrivateMatch[],
+  labels: ReadonlyMap<PrivateMatch, readonly string[]>,
+): Map<string, { readonly starts: number[]; readonly maxEnd: number[] }> {
+  const byLabel = new Map<string, PrivateMatch[]>();
+  for (const winner of winners) {
+    for (const label of labels.get(winner) ?? []) {
+      const list = byLabel.get(label);
+      if (list) list.push(winner);
+      else byLabel.set(label, [winner]);
+    }
+  }
+  const result = new Map<string, { starts: number[]; maxEnd: number[] }>();
+  for (const [label, list] of byLabel) {
+    list.sort((a, b) => a.start - b.start);
+    let furthest = -1;
+    result.set(label, {
+      starts: list.map(winner => winner.start),
+      maxEnd: list.map(winner => (furthest = Math.max(furthest, winner.end))),
+    });
+  }
+  return result;
+}
+
+/** Whether a winner that starts before the candidate ends reaches past its start. */
+function overlapsWinner(
+  winners: { readonly starts: readonly number[]; readonly maxEnd: readonly number[] } | undefined,
+  candidate: PrivateMatch,
+): boolean {
+  if (!winners) return false;
+  let low = 0;
+  let high = winners.starts.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if ((winners.starts[mid] ?? 0) < candidate.end) low = mid + 1;
+    else high = mid;
+  }
+  return low > 0 && (winners.maxEnd[low - 1] ?? -1) > candidate.start;
+}
+
 function protectedRanges(text: string, scheme: PlaceholderScheme, literal: RegExp | undefined) {
   const ranges = [...text.matchAll(scheme.pattern)].map(match => ({
     start: match.index,
@@ -298,7 +420,11 @@ export function findPrivateMatches(
   const candidates: PrivateMatch[] = [];
   const index = knownIndex(known, knownTokens, options.placeholders ?? DEFAULT_SCHEME);
   if (index.tokens) index.tokens.lastIndex = 0;
-  const guarded = protectedRanges(text, options.placeholders ?? DEFAULT_SCHEME, index.tokens);
+  const guarded = mergeRanges(protectedRanges(text, options.placeholders ?? DEFAULT_SCHEME, index.tokens));
+  // Detectors read placeholders as filler of the same length, so a raw value
+  // right next to one (`KEY={{…}}tail`, `postgres://{{…}}:password@host`) is
+  // still found; the parts inside placeholders are cut away below.
+  const scanText = guarded.length > 0 ? blankRanges(text, guarded) : text;
 
   // Literal values are treated as literals, not as regexes. A rule's own
   // ignoreCase wins over the option, so the values form two alternations.
@@ -332,14 +458,14 @@ export function findPrivateMatches(
     }
   }
   if (options.redactEmails) {
-    for (const { start, end } of findEmails(text)) {
+    for (const { start, end } of findEmails(scanText)) {
       candidates.push({ start, end, value: text.slice(start, end), category: 'EMAIL', priority: 1 });
     }
   }
   const outranking: PrivateMatch[] = [];
   const outranked = new Map<PrivateMatch, readonly string[]>();
   for (const detector of options.detectors ?? DEFAULT_DETECTORS) {
-    for (const { start, end, label } of detector.find(text)) {
+    for (const { start, end, label } of detector.find(scanText)) {
       const candidate = {
         start,
         end,
@@ -356,28 +482,23 @@ export function findPrivateMatches(
     }
   }
   // A detector that knows better removes overlapping matches of the labels it outranks.
-  const beaten = (candidate: PrivateMatch) =>
-    outranking.some(
-      winner =>
-        winner !== candidate &&
-        (outranked.get(winner) ?? []).includes(candidate.category) &&
-        candidate.start < winner.end &&
-        candidate.end > winner.start,
-    );
   if (outranking.length > 0) {
-    const survivors = candidates.filter(candidate => !beaten(candidate));
+    const beats = winnersByLabel(outranking, outranked);
+    const survivors = candidates.filter(candidate => !overlapsWinner(beats.get(candidate.category), candidate));
     candidates.splice(0, candidates.length, ...survivors);
   }
 
   // Leftmost wins, then longest; on a tie, configured values beat detectors.
-  candidates.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start) || a.priority - b.priority);
+  const byPosition = (a: PrivateMatch, b: PrivateMatch) =>
+    a.start - b.start || b.end - b.start - (a.end - a.start) || a.priority - b.priority;
+  candidates.sort(byPosition);
+  const pieces = guarded.length > 0 ? outsideRanges(candidates, guarded, text).sort(byPosition) : candidates;
 
   // A candidate that starts inside the previous span but runs past it is merged
   // into that span: dropping it would leave its tail (an email's domain, say) in
   // clear text, which the outbound audit would then refuse on every request.
   const selected: PrivateMatch[] = [];
-  for (const candidate of candidates) {
-    if (guarded.some(range => candidate.start < range.end && candidate.end > range.start)) continue;
+  for (const candidate of pieces) {
     const last = selected[selected.length - 1];
     if (last && candidate.start < last.end) {
       if (candidate.end > last.end) {

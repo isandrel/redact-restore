@@ -119,6 +119,17 @@ for (const size of VAULT_SIZES) {
   );
 }
 
+// Shapes that were quadratic once: a placeholder on every line, and connection strings.
+const token = '{{PRIVATE:CUSTOM#000000000001}}';
+const dense = `${token} met user@example.com at build.acme.internal\n`.repeat(20_000);
+time(
+  'maskText 1 MB, a placeholder on every line',
+  () => maskText(dense, matching, { [token]: 'Value 1 Example' }),
+  results,
+);
+const urls = 'DB_URL=postgres://svc:Pw9xQ2zL7k@h.example.internal/x\n'.repeat(19_000);
+time('maskText 1 MB of connection strings', () => maskText(urls, matching, {}), results);
+
 // Each active detector (gitleaks as one) alone on 1 MB: the slow ones show up here.
 const perDetector = (base.detectors ?? DETECTORS)
   .map(detector => {

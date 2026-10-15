@@ -5,6 +5,7 @@ import {
   type MatchingOptions,
   type PrivacyCategory,
   type PrivateMatch,
+  textHash,
 } from './matcher.ts';
 import { CUSTOM_LABEL, DEFAULT_SCHEME, type PlaceholderScheme } from './placeholder.ts';
 
@@ -460,20 +461,6 @@ export function createAuditMemo(): AuditMemo {
   return { clean: new Map() };
 }
 
-/** A 53-bit hash with the length: a key for text already audited (cyrb53). */
-function textKey(text: string): string {
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return `${text.length}:${(2097151 & h2) * 4294967296 + (h1 >>> 0)}`;
-}
-
 /** Options that match only known values: for re-checking clean text against values learned since. */
 function knownOnly(options: MatchingOptions): MatchingOptions {
   return {
@@ -498,7 +485,7 @@ export function auditMessages(
   // The first match in a part, scanning only what the memo has not seen yet.
   const firstMatch = (part: string): PrivateMatch | undefined => {
     if (!memo) return findPrivateMatches(part, options, known, tokens)[0];
-    const key = textKey(part);
+    const key = textHash(part);
     const seenAt = memo.clean.get(key);
     if (seenAt === tokens.length) return undefined;
     const match =
