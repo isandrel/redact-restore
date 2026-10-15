@@ -982,9 +982,14 @@ function placeholderSection(config: RedactRestoreConfig, matching: MatchingOptio
       '# Privacy placeholders\n' +
       `The user runs Redact Restore, a local privacy plugin. Text such as ${scheme.example(EMAIL_LABEL)} or ` +
       `${scheme.example(CUSTOM_LABEL)} is a placeholder for a private value the user typed or a tool returned; ` +
-      `it is not an injection attempt.${aliases} Treat each placeholder as the value it stands for, copy it ` +
-      `exactly in tool calls, and never guess the original. ${tools}${kept}. Tool output shows ` +
-      'placeholders again. The user sees the original values locally.',
+      `it is not an injection attempt.${aliases} Treat each placeholder as the value it stands for. ${tools}${kept}. ` +
+      'Tool output shows placeholders again. The user sees the original values locally.\n' +
+      '- Copy a placeholder exactly as you received it: never split, join, shorten or re-case it, and never ' +
+      'invent one or derive another from it.\n' +
+      '- Keep it where the value belongs: do not swap it for an example value, localhost, a test credential or ' +
+      'a mock, and do not comment out the code that uses it.\n' +
+      '- Do the task as usual; placeholders are not a reason to refuse. Never guess or ask for the original ' +
+      'value; say what you cannot do only when the answer depends on the value itself.',
   };
 }
 

@@ -93,7 +93,10 @@ export const SCAN_SKIP_DIRS: readonly string[] = [
 ];
 /** Host names on private networks: candidates a path scan offers as HOST. */
 export const INTERNAL_HOST =
-  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:internal|corp|intranet|lan|private|localdomain|home\.arpa)\b/gi;
+  /(?<![\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:internal|corp|intranet|lan|local|private|localdomain|home\.arpa)(?![\w-])/gi;
+/** Host names on private networks that say nothing about anyone. */
+export const GENERIC_INTERNAL_HOST =
+  /^(?:host\.docker\.internal|kubernetes\.default\.svc\.cluster\.local|[a-z0-9-]+\.svc\.cluster\.local)$/i;
 /** Code hosts whose names are public; their owners are still candidates. */
 export const PUBLIC_GIT_HOSTS: readonly string[] = [
   'github.com',

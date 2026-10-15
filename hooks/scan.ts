@@ -195,7 +195,7 @@ export function fileCandidates(
     for (const { key, value } of envAssignments(file.text)) {
       add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`);
     }
-    for (const match of file.text.matchAll(INTERNAL_HOST)) add(match[0].toLowerCase(), 'HOST', file.name);
+    for (const match of file.text.matchAll(INTERNAL_HOST)) add(match[0], 'HOST', file.name);
   }
   return candidates;
 }

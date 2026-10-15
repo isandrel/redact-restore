@@ -65,6 +65,11 @@ const HIDE: Array<[string, string, string]> = [
   ['CN_PHONE', '+86 13912345678', '+86 13912345678'],
   ['CN_USCC', `代码 ${uscc('91350100M000100Y4')}`, uscc('91350100M000100Y4')],
   ['IP', 'host 10.20.30.40 is down', '10.20.30.40'],
+  ['HOST', 'ssh build.acme.internal now', 'build.acme.internal'],
+  ['HOST', 'ping alices-mbp.local', 'alices-mbp.local'],
+  ['IP', 'route 2001:db8:85a3::8a2e:370:7334 up', '2001:db8:85a3::8a2e:370:7334'],
+  ['IP', 'peer fe80::1ff:fe23:4567:890a', 'fe80::1ff:fe23:4567:890a'],
+  ['MAC', 'nic aa:bb:cc:12:34:56', 'aa:bb:cc:12:34:56'],
   ['SECRET', `aws_access_key_id = ${join('Zq', 'Pw7Lm2Xk9Rt4')}`, join('Zq', 'Pw7Lm2Xk9Rt4')],
   ['SECRET', `client_secret_value: ${join('Hb', '3Kd8Wn5Qy2Vs')}`, join('Hb', '3Kd8Wn5Qy2Vs')],
   ['US_SSN', 'SSN 078-05-1120', '078-05-1120'],
@@ -72,6 +77,11 @@ const HIDE: Array<[string, string, string]> = [
 ];
 
 const KEEP = [
+  'meet at 12:30:45 or 9:05',
+  'std::vector<int> and a::b::c',
+  'reach host.docker.internal from the container',
+  'loopback ::1 is fine',
+  'mac 00:00:00:00:00:00 means unset',
   'password = getPassword()',
   'token: ${API_TOKEN}',
   'apiKey = process.env.API_KEY',

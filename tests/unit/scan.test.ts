@@ -130,7 +130,8 @@ describe('candidates', () => {
     expect(result.candidates.map(one => one.value)).not.toContain('Bob Example');
     expect(result.candidates.map(one => one.value)).not.toContain('Carol Example');
     expect(result.ignored).toBe(1);
-    expect(result.covered).toBe(3);
+    // alice@example.com, bob@example.com, git.acme.internal (internal_host); Bob Example is a rule.
+    expect(result.covered).toBe(4);
   });
 });
 
@@ -192,12 +193,17 @@ describe('path scan', () => {
     expect(maskedKinds([...files, files[1] ?? { text: '' }], matching)).toEqual([
       ['EMAIL', 1],
       ['ENV', 1],
+      ['HOST', 1],
       ['SECRET', 1],
     ]);
     const assigned = assignedValues(files);
     const result = await triage(fileCandidates(files), matching, new Set(), one => assigned.has(one.value));
-    expect(result.candidates.map(one => one.value)).toEqual(['build.acme.internal']);
-    expect(result.covered).toBe(2);
+    // The internal_host detector masks build.acme.internal, so nothing is new.
+    expect(result.candidates.map(one => one.value)).toEqual([]);
+    expect(result.covered).toBe(3);
+    const withoutHosts = parseConfig({ disable_detectors: 'internal_host' }).matching;
+    const offered = await triage(fileCandidates(files), withoutHosts, new Set(), one => assigned.has(one.value));
+    expect(offered.candidates.map(one => one.value)).toEqual(['build.acme.internal']);
   });
 
   test('skip folders and the file limit are options', () => {

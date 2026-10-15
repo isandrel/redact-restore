@@ -10,6 +10,8 @@
  * Chinese assignment keywords), Presidio (Luhn, IBAN).
  */
 import {
+  GENERIC_INTERNAL_HOST,
+  INTERNAL_HOST,
   KEYWORD_RESCAN_LIMIT,
   KEYWORD_WINDOW_AFTER,
   KEYWORD_WINDOW_BEFORE,
@@ -546,6 +548,37 @@ export const DETECTORS: readonly Detector[] = [
     /(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\d.])/g,
     '.',
     value => !/^(?:127\.|0\.0\.0\.0$|255\.255\.255\.255$)/.test(value),
+  ),
+  regexDetector(
+    'internal_host',
+    'HOST',
+    ['network'],
+    true,
+    INTERNAL_HOST,
+    undefined,
+    value => !GENERIC_INTERNAL_HOST.test(value),
+  ),
+  regexDetector(
+    'ipv6',
+    'IP',
+    ['network'],
+    true,
+    /(?<![\w:.])(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,7}:|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){5}|[0-9a-f]{1,4}:(?::[0-9a-f]{1,4}){6})(?![\w:.])/gi,
+    ':',
+    // A real address has 3+ groups and a letter or a long group; skips times (12:30) and loopback.
+    value =>
+      value !== '::1' &&
+      value.split(':').filter(Boolean).length >= 3 &&
+      (/[a-f]/i.test(value) || value.split(':').some(group => group.length >= 3)),
+  ),
+  regexDetector(
+    'mac_address',
+    'MAC',
+    ['network'],
+    true,
+    /(?<![\w:-])(?:[0-9a-f]{2}([:-]))(?:[0-9a-f]{2}\1){4}[0-9a-f]{2}(?![\w:-])/gi,
+    undefined,
+    value => !/^(?:00[:-]){5}00$|^(?:ff[:-]){5}ff$/i.test(value),
   ),
 ];
 

@@ -328,45 +328,52 @@ describe('path scan', () => {
   const file = (name: string, size = 60): Entry => ({ name, kind: 'file', size, mtimeMs: 0, isLink: false });
   const dir = (name: string): Entry => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false });
 
-  test('reads text files under a folder on this machine; the reply holds counts and labels only', async ($, on) => {
-    const seen = world(
-      on,
-      {},
-      {
-        '/home/user/proj/config/app.env': 'TEAM_CODENAME=bluefalcon-internal\n',
-        '/home/user/proj/docs/setup.md': 'Connect to build.acme.internal.\n',
-        '/home/user/proj/node_modules/pkg/x.env': 'LEAK=never-read-this\n',
-        '/home/user/proj/big.bin': 'binary\u0000data',
-      },
-      {
-        '/home/user/proj': [
-          dir('config'),
-          dir('docs'),
-          dir('node_modules'),
-          file('big.bin'),
-          file('huge.txt', 10_000_000),
-        ],
-        '/home/user/proj/config': [file('app.env')],
-        '/home/user/proj/docs': [file('setup.md')],
-        '/home/user/proj/node_modules': [dir('pkg')],
-        '/home/user/proj/node_modules/pkg': [file('x.env')],
-      },
-    );
-    const text = await run($, 'scan ~/proj');
-    expect(text).toBe(
-      'Scan of ~/proj (2 file(s) read) found 1 new candidate(s) (1 HOST); 1 already masked, 0 ignored before. ' +
-        'Already masked in these files: 1 ENV. Review them in the Redact Restore pane. Values are shown only there, on this machine.',
-    );
-    for (const value of ['bluefalcon-internal', 'build.acme.internal', '/home/user']) expect(text).not.toContain(value);
-    expect(seen.opened).toEqual(['redact-restore']);
-    const pane = await mountPane($, 'desktop');
-    const drawn = JSON.stringify(await pane.drawn());
-    expect(drawn).toContain('~/proj');
-    expect(drawn).not.toContain('build.acme.internal');
-    await pane.press({ key: 'accept-0' });
-    await eventually(() => masks($, seen, 'build.acme.internal'));
-    expect(seen.prompt).toMatch(/\{\{PRIVATE:HOST#/);
-  });
+  test(
+    'reads text files under a folder on this machine; the reply holds counts and labels only',
+    {
+      options: { disable_detectors: 'internal_host' },
+    },
+    async ($, on) => {
+      const seen = world(
+        on,
+        {},
+        {
+          '/home/user/proj/config/app.env': 'TEAM_CODENAME=bluefalcon-internal\n',
+          '/home/user/proj/docs/setup.md': 'Connect to build.acme.internal.\n',
+          '/home/user/proj/node_modules/pkg/x.env': 'LEAK=never-read-this\n',
+          '/home/user/proj/big.bin': 'binary\u0000data',
+        },
+        {
+          '/home/user/proj': [
+            dir('config'),
+            dir('docs'),
+            dir('node_modules'),
+            file('big.bin'),
+            file('huge.txt', 10_000_000),
+          ],
+          '/home/user/proj/config': [file('app.env')],
+          '/home/user/proj/docs': [file('setup.md')],
+          '/home/user/proj/node_modules': [dir('pkg')],
+          '/home/user/proj/node_modules/pkg': [file('x.env')],
+        },
+      );
+      const text = await run($, 'scan ~/proj');
+      expect(text).toBe(
+        'Scan of ~/proj (2 file(s) read) found 1 new candidate(s) (1 HOST); 1 already masked, 0 ignored before. ' +
+          'Already masked in these files: 1 ENV. Review them in the Redact Restore pane. Values are shown only there, on this machine.',
+      );
+      for (const value of ['bluefalcon-internal', 'build.acme.internal', '/home/user'])
+        expect(text).not.toContain(value);
+      expect(seen.opened).toEqual(['redact-restore']);
+      const pane = await mountPane($, 'desktop');
+      const drawn = JSON.stringify(await pane.drawn());
+      expect(drawn).toContain('~/proj');
+      expect(drawn).not.toContain('build.acme.internal');
+      await pane.press({ key: 'accept-0' });
+      await eventually(() => masks($, seen, 'build.acme.internal'));
+      expect(seen.prompt).toMatch(/\{\{PRIVATE:HOST#/);
+    },
+  );
 });
 
 describe('import and export', () => {
@@ -481,9 +488,10 @@ describe('session tab', () => {
       const pane = await mountPane($, surface);
       const drawn = JSON.stringify(await pane.drawn());
       expect(drawn).toContain(placeholder);
-      expect(drawn).toContain('1 values');
+      expect(drawn).toContain('2 values');
       expect(drawn).toContain('EMAIL 1');
-      expect(drawn).toContain('prompt 1');
+      expect(drawn).toContain('HOST 1');
+      expect(drawn).toContain('prompt 2');
       expect(drawn).not.toContain('alice@example.com');
       await pane.press({ key: 'reveal' });
       await eventually(async () => JSON.stringify(await pane.drawn()).includes('alice@example.com'));
