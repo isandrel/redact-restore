@@ -52,6 +52,9 @@ function harness(on: On, messages: unknown[] = [], store: Record<string, unknown
   });
   on('ui.render', ($, e) => {
     if (e.component === 'UserMessage' || e.component === 'AssistantMessage') seen.drawn.push(e.props.text);
+    if (e.component === 'ToolUse') seen.drawn.push(JSON.stringify([e.props.input, e.props.output]));
+    if (e.component === 'ToolResult') seen.drawn.push(JSON.stringify(e.props.output));
+    if (e.component === 'AskUserQuestion') seen.drawn.push(JSON.stringify(e.props.questions));
     return h('Text', null, 'drawn') as never;
   });
   on('session.messages', () => ({ value: messages }) as never);
@@ -386,6 +389,53 @@ describe('local restoration', () => {
     await drawAssistant($, `Hello ${token}`, 'desktop');
     expect(seen.drawn).toEqual([`Hello ${SECRET}`, `Hello ${SECRET}`]);
   });
+
+  test('tool rows, tool results and questions render restored', configured, async ($, on) => {
+    const seen = harness(on);
+    const token = await placeholderFor($, seen, SECRET);
+    const unknown = '{{PRIVATE:EMAIL#000000000000}}';
+    const row = { tool_use_id: 'tu-1', tool: 'Bash', isRunning: false, isErrored: false, isInterrupted: false };
+    await $.ui.render({
+      surface: 'terminal',
+      component: 'ToolUse',
+      requestId: 'tu-1',
+      props: { ...row, input: { command: `echo ${token} ${unknown}` }, output: { stdout: token, stderr: '' } },
+    } as never);
+    await $.ui.render({
+      surface: 'desktop',
+      component: 'ToolResult',
+      requestId: 'tu-1',
+      props: { tool_use_id: 'tu-1', tool: 'Bash', isErrored: false, output: { stdout: `got ${token}`, stderr: '' } },
+    } as never);
+    await $.ui.render({
+      surface: 'terminal',
+      component: 'AskUserQuestion',
+      requestId: 'q-1',
+      props: { tool: 'AskUserQuestion', questions: [{ question: `Use ${token}?`, header: 'Pick', options: [] }] },
+    } as never);
+    expect(seen.drawn).toEqual([
+      JSON.stringify([{ command: `echo ${SECRET} ${unknown}` }, { stdout: SECRET, stderr: '' }]),
+      JSON.stringify({ stdout: `got ${SECRET}`, stderr: '' }),
+      JSON.stringify([{ question: `Use ${SECRET}?`, header: 'Pick', options: [] }]),
+    ]);
+  });
+
+  test(
+    'restore_display_rows picks the rows restored on screen',
+    { options: { ...base, restore_display_rows: 'assistantmessage, NoSuchRow' } },
+    async ($, on) => {
+      const seen = harness(on);
+      const token = await placeholderFor($, seen, SECRET);
+      await drawAssistant($, `Hello ${token}`);
+      await $.ui.render({
+        surface: 'terminal',
+        component: 'ToolResult',
+        requestId: 'tu-2',
+        props: { tool_use_id: 'tu-2', tool: 'Bash', isErrored: false, output: { stdout: token, stderr: '' } },
+      } as never);
+      expect(seen.drawn).toEqual([`Hello ${SECRET}`, JSON.stringify({ stdout: token, stderr: '' })]);
+    },
+  );
 
   test('display restoration can be turned off', { options: { ...base, restore_display: false } }, async ($, on) => {
     const seen = harness(on);

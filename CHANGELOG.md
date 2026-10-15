@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Tool rows, tool results and `AskUserQuestion` dialogs show original values on screen, like messages. Rows to restore are listed in one table in `hooks/defaults.ts` and chosen with the new `restore_display_rows` option.
 - Pattern rules: mask every match of your own regular expression, from the rules form (pattern, example it must match, label, ignore case, whole word, mask the whole match or one group) or the `custom_patterns` option. JavaScript cannot time out a regex, so patterns use a safe subset checked without running them (no backreferences, lookarounds or repeated groups, at most 2 open-ended repeats, a required keyword) and run only near their keyword. They are exported and imported as fields; `import --replace` replaces saved patterns only when the file has a `patterns` list.
 - Exact values can ignore case on their own, overriding `custom_case_insensitive` either way.
 - New default-on detectors: `internal_host` (`*.internal`, `*.corp`, `*.lan`, `*.local`, …, told apart from code such as `self.local`), `ipv6` and `mac_address`. Turn any of them off with `disable_detectors`.

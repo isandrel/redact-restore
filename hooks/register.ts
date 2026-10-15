@@ -9,6 +9,8 @@ import {
   PANE_ID,
   PANE_TITLE,
   SCAN_LOG_AUTHORS,
+  DISPLAY_RESTORE_FIELDS,
+  type DisplayRow,
   SCAN_MAX_DEPTH,
   SCAN_MAX_DIRS,
   SCAN_MAX_FILE_BYTES,
@@ -85,6 +87,7 @@ import {
   maskText,
   restoreInput,
   uniqueMatches,
+  restoreFields,
   unmaskText,
   withholdContentBlocks,
   type AuditMemo,
@@ -1116,21 +1119,19 @@ export const register: Register = (on, options) => {
     );
   });
 
-  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
-    if (!config.enabled || !config.restoreDisplay) return next(e);
-    const text = unmaskText(e.props.text, await vaultNow($), false, config.placeholders);
-    return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } });
-  });
-  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!config.enabled || !config.restoreDisplay) return next(e);
-    const text = unmaskText(e.props.text, await vaultNow($), false, config.placeholders);
-    return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } });
-  });
+  // Rows draw what the model sent (placeholders); show the originals on this machine.
+  if (config.restoreDisplay && config.displayRows.length > 0) {
+    on('ui.render', { component: config.displayRows }, async ($, e, next) => {
+      if (!config.enabled) return next(e);
+      const fields = DISPLAY_RESTORE_FIELDS[e.component as DisplayRow];
+      const props = restoreFields(e.props, fields, await vaultNow($), config.placeholders);
+      return props === e.props ? next(e) : next({ ...e, props } as typeof e);
+    });
+  }
 };
 
-/** Tells the model what placeholders are; carries no private value. */
 /**
- * The note for the model. Its text depends only on the options, never on rules
+ * Tells the model what placeholders are; carries no private value. Its text depends only on the options, never on rules
  * that change during a session: the system prompt must stay byte-identical so
  * the provider's prompt cache keeps hitting.
  */

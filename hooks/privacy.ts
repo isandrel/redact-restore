@@ -50,10 +50,20 @@ function escapeRegExp(value: string): string {
 // Known tokens restore exactly, whatever format minted them. A side that starts
 // or ends with a word character gets a boundary, so an alias such as CODENAME_X
 // is not restored inside CODENAME_X2.
-let tokenCache: { key: string; pattern: RegExp } | undefined;
+let tokenCache: { vault: Vault; size: number; key: string; pattern: RegExp } | undefined;
 function knownTokenPattern(vault: Vault, scheme: PlaceholderScheme = DEFAULT_SCHEME): RegExp | undefined {
-  const tokens = Object.keys(vault).sort((a, b) => b.length - a.length);
+  const tokens = Object.keys(vault);
   if (tokens.length === 0) return undefined;
+  // A vault only grows and never remaps a token: the same object at the same size is unchanged.
+  if (
+    tokenCache?.vault === vault &&
+    tokenCache.size === tokens.length &&
+    tokenCache.key.startsWith(`${scheme.format}\u0001`)
+  ) {
+    tokenCache.pattern.lastIndex = 0;
+    return tokenCache.pattern;
+  }
+  tokens.sort((a, b) => b.length - a.length);
   const key = `${scheme.format}\u0001${tokens.join('\u0000')}`;
   if (tokenCache?.key !== key) {
     const word = /[A-Za-z0-9_]/;
@@ -67,8 +77,8 @@ function knownTokenPattern(vault: Vault, scheme: PlaceholderScheme = DEFAULT_SCH
           `${bounded(token) && word.test(token.charAt(token.length - 1)) ? '(?![A-Za-z0-9_])' : ''}`,
       )
       .join('|');
-    tokenCache = { key, pattern: new RegExp(source, 'g') };
-  }
+    tokenCache = { vault, size: tokens.length, key, pattern: new RegExp(source, 'g') };
+  } else tokenCache = { ...tokenCache, vault, size: tokens.length };
   tokenCache.pattern.lastIndex = 0;
   return tokenCache.pattern;
 }
@@ -186,6 +196,35 @@ export function inputHasPlaceholder(
  */
 export function restoreInput<T>(input: T, vault: Vault, scheme: PlaceholderScheme = DEFAULT_SCHEME): T {
   return mapStrings(input, text => unmaskText(text, vault, true, scheme)) as T;
+}
+
+/**
+ * Restores known tokens in every string of a value, for drawing on this
+ * machine only. Unknown placeholders stay as they are. Returns the same value
+ * when nothing changed.
+ */
+export function restoreForDisplay<T>(value: T, vault: Vault, scheme: PlaceholderScheme = DEFAULT_SCHEME): T {
+  return mapStrings(value, text => unmaskText(text, vault, false, scheme)) as T;
+}
+
+/**
+ * The props with the named fields restored for display; the same object when
+ * nothing changed, and a field that was absent stays absent.
+ */
+export function restoreFields<T extends object>(
+  props: T,
+  fields: readonly string[],
+  vault: Vault,
+  scheme: PlaceholderScheme = DEFAULT_SCHEME,
+): T {
+  let changed: Record<string, unknown> | undefined;
+  for (const field of fields) {
+    if (!(field in props)) continue;
+    const value = (props as Record<string, unknown>)[field];
+    const restored = restoreForDisplay(value, vault, scheme);
+    if (restored !== value) changed = { ...changed, [field]: restored };
+  }
+  return changed ? { ...props, ...changed } : props;
 }
 
 /**

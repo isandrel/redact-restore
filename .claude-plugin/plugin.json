@@ -72,8 +72,14 @@
     "restore_display": {
       "type": "boolean",
       "title": "Restore local message display",
-      "description": "Show original values in locally rendered chat messages.",
+      "description": "Show original values in locally rendered chat messages, tool rows and questions.",
       "default": true
+    },
+    "restore_display_rows": {
+      "type": "string",
+      "title": "Rows restored on screen",
+      "description": "Comma-separated rows that show original values when restore_display is on: UserMessage, AssistantMessage, ToolUse, ToolResult, AskUserQuestion.",
+      "default": "UserMessage, AssistantMessage, ToolUse, ToolResult, AskUserQuestion"
     },
     "restore_streaming": {
       "type": "boolean",

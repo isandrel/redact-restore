@@ -77,6 +77,22 @@ export const EXPORT_FILE = 'redact-restore-rules.json';
 /** Dots in a masked preview (`P•••• (15)`). */
 export const PREVIEW_DOTS = 4;
 
+// Display
+/**
+ * Rendered rows that can show placeholders, and the props restored for drawing
+ * on this machine. Add a row here to restore it; `restore_display_rows` picks
+ * which ones are on. Only what is drawn changes: stored rows and model input keep placeholders.
+ */
+export const DISPLAY_RESTORE_FIELDS = {
+  UserMessage: ['text'],
+  AssistantMessage: ['text'],
+  ToolUse: ['input', 'output'],
+  ToolResult: ['output'],
+  AskUserQuestion: ['questions'],
+} as const satisfies Record<string, readonly string[]>;
+export type DisplayRow = keyof typeof DISPLAY_RESTORE_FIELDS;
+export const DISPLAY_ROWS = Object.keys(DISPLAY_RESTORE_FIELDS) as DisplayRow[];
+
 // Scan
 export const SCAN_TIMEOUT_MS = 5000;
 export const SCAN_LOG_AUTHORS = 200;

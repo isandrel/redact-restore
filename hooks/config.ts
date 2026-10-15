@@ -3,7 +3,14 @@ import { patternDetector, patternProblem, type PatternRule } from './patterns.ts
 import { DEFAULT_POLICY, RESTORE_MODES, parsePatternList, type RestoreMode, type RestorePolicy } from './policy.ts';
 import { STATUS_LINES, type StatusLine } from './status.ts';
 import { selectDetectors } from './detectors.ts';
-import { RULE_LABELS, SCAN_FILES_CEILING, SCAN_MAX_FILES, SCAN_SKIP_DIRS } from './defaults.ts';
+import {
+  RULE_LABELS,
+  SCAN_FILES_CEILING,
+  SCAN_MAX_FILES,
+  SCAN_SKIP_DIRS,
+  DISPLAY_ROWS,
+  type DisplayRow,
+} from './defaults.ts';
 import {
   createScheme,
   DEFAULT_FORMAT,
@@ -32,6 +39,8 @@ export interface RedactRestoreConfig {
   readonly formatProblem: string | undefined;
   readonly placeholders: PlaceholderScheme;
   readonly restoreDisplay: boolean;
+  /** Rendered rows restored for display (`restore_display_rows`). */
+  readonly displayRows: readonly DisplayRow[];
   /** Also restore in the live streamed reply (the engine records that text too; it is re-masked on store). */
   readonly restoreStreaming: boolean;
   readonly restore: RestorePolicy;
@@ -58,6 +67,12 @@ function patterns(options: RawOptions, key: string, fallback: readonly string[])
   if (typeof value === 'string') return parsePatternList(value);
   if (Array.isArray(value)) return value.flatMap(item => parsePatternList(item));
   return fallback;
+}
+
+/** Known row names, case-insensitive; unknown names are dropped. */
+function displayRows(names: readonly string[]): DisplayRow[] {
+  const wanted = new Set(names.map(name => name.toLowerCase()));
+  return DISPLAY_ROWS.filter(row => wanted.has(row.toLowerCase()));
 }
 
 function restoreMode(value: RawOptions[string] | undefined): RestoreMode {
@@ -125,6 +140,7 @@ export function parseConfig(options: RawOptions): RedactRestoreConfig {
     formatProblem: formatProblem(format),
     placeholders,
     restoreDisplay: flag(options, 'restore_display', true),
+    displayRows: displayRows(patterns(options, 'restore_display_rows', DISPLAY_ROWS)),
     restoreStreaming: flag(options, 'restore_streaming', false),
     restore: {
       mode: restoreMode(options.restore_mode),
