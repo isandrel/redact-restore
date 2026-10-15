@@ -52,7 +52,7 @@ A placeholder tells the model the kind of value through its label. Two more laye
 - **Label meanings.** The placeholder note in the system prompt says what common labels stand for (`HOST` is a private host name, `ENV` is the value of an environment variable, and so on). The list is `LABEL_DESCRIPTIONS` in `hooks/defaults.ts`. The note depends only on the options, so the prompt cache keeps hitting.
 - **Per-rule descriptions.** A saved value or pattern can carry a description, such as `client company name` or `production database host`, typed in the rules form (**Description for the model**) or set in an import file. A scan suggests one from where it found the value (`the user's own name (git config)`, `the value of DB_PASSWORD`).
 
-The first time a described placeholder appears, its description goes to the model once, as context attached to your next prompt that you do not see in the transcript:
+The first time a described placeholder appears, its description goes to the model once: with your prompt as context you do not see in the transcript, or at the end of the tool result that first held the value:
 
 ```text
 Redact Restore: what these placeholders stand for (the values stay on the user's machine; use the placeholders as they are):
@@ -61,7 +61,7 @@ Redact Restore: what these placeholders stand for (the values stay on the user's
 
 Added to the new message, never to the system prompt, the note leaves the cached prefix intact. At most 50 descriptions go with one prompt; the rest go with the next.
 
-Checks, all on your machine: a description is one line of up to 120 characters without `{` or `}`; it is refused when it contains its own value (or, for a pattern, when the pattern matches it); and it is masked before sending, so another private value inside it becomes a placeholder. A placeholder that first appears in a tool result mid-turn is described with your next prompt. After `/compact` the model may lose earlier descriptions; they are not sent again.
+Checks, all on your machine: a description is one line of up to 120 characters without `{` or `}`; it is refused when it contains its own value (or, for a pattern, when the pattern matches it); and it is masked before sending, so another private value inside it becomes a placeholder. A placeholder that first appears in a tool result is described at the end of that tool result, as the model reads it (main conversation; a subagent's are described with your next prompt). After a compaction, descriptions are sent again with your next prompt.
 
 A fixed alias is restored wherever it appears as a whole word, so it must look unlike ordinary text: at least 4 characters, no spaces, and an underscore, a digit, or two capitals. An alias must also not overlap any other rule's value (in the options or saved), and two values cannot share one. The pane and imports refuse such a rule; if one is found in the merged rules anyway, its alias is dropped and the value is still masked with the default label; an invalid `placeholder_format` falls back to the default with a toast explaining why. Placeholders minted in an earlier format still restore after you change it.
 

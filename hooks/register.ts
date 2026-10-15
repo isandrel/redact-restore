@@ -311,6 +311,32 @@ async function loadSessionMap($: EngineInterface): Promise<Vault | undefined> {
   return merged;
 }
 
+/** A tool result with a note added after its content, as the model reads it. */
+function withNote<T extends { readonly type: string }>(block: T, note: string): T {
+  const content = (block as { readonly content?: unknown }).content;
+  if (typeof content === 'string') return { ...block, content: `${content}\n\n${note}` };
+  if (Array.isArray(content)) return { ...block, content: [...content, { type: 'text', text: note }] };
+  return { ...block, content: note };
+}
+
+/** Described placeholders the model has not been told about yet, oldest first. */
+async function untoldNotes($: EngineInterface, notes: Notes, additions: Vault): Promise<Array<[string, string]>> {
+  const told = await read($, legend);
+  const known = { ...(await vaultNow($)), ...additions };
+  return Object.entries({ ...told.notes, ...notes })
+    .filter(([token]) => known[token] !== undefined && !told.sent[token])
+    .slice(0, LEGEND_MAX_ENTRIES);
+}
+
+async function markTold($: EngineInterface, entries: ReadonlyArray<readonly [string, string]>): Promise<void> {
+  if (entries.length === 0) return;
+  await update($, legend, current => ({
+    ...current,
+    sent: { ...current.sent, ...Object.fromEntries(entries.map(([token]) => [token, true] as const)) },
+  }));
+  await saveSessionMap($).catch(ignore);
+}
+
 /**
  * The vault for drawing. A render may not write $.state, so after a resume the
  * rows drawn before the next event read the saved map without loading it.
@@ -1047,12 +1073,7 @@ export const register: Register = (on, options) => {
     const text = masker.mask(e.text);
     const masked = e.context?.map(item => masker.mask(item)) ?? [];
     // Descriptions the model has not had yet go with this prompt, as context the user does not see.
-    const told = await read($, legend);
-    const known = { ...(await vaultNow($)), ...masker.additions() };
-    const notes = { ...told.notes, ...masker.notes() };
-    const fresh = Object.entries(notes)
-      .filter(([token]) => known[token] !== undefined && !told.sent[token])
-      .slice(0, LEGEND_MAX_ENTRIES);
+    const fresh = await untoldNotes($, masker.notes(), masker.additions());
     const context = fresh.length > 0 ? [...masked, legendText(fresh, MESSAGES.legendHeader, masker.mask)] : masked;
     await record(
       $,
@@ -1061,13 +1082,7 @@ export const register: Register = (on, options) => {
       combine(metricsChange.newTurn(), metricsChange.masked('prompt', masker.count(), 'prompt.submit')),
       masker.notes(),
     );
-    if (fresh.length > 0) {
-      await update($, legend, current => ({
-        ...current,
-        sent: { ...current.sent, ...Object.fromEntries(fresh.map(([token]) => [token, true] as const)) },
-      }));
-      await saveSessionMap($).catch(ignore);
-    }
+    await markTold($, fresh);
     return next({ ...e, text, ...(context.length > 0 ? { context } : {}) });
   }).catch(async ($, e, next) => {
     if (next.called) return next(e);
@@ -1148,13 +1163,27 @@ export const register: Register = (on, options) => {
 
   on('session.append', async ($, e, next) => {
     if (!config.enabled) return next(e);
-    const result = maskContentBlocks(e.message.content, await currentMatching($, ctx), await vaultNow($), policy);
+    const matching = await currentMatching($, ctx);
+    const result = maskContentBlocks(e.message.content, matching, await vaultNow($), policy);
     const changes = [
       ...(result.count > 0 ? [metricsChange.masked('conversation', result.count, 'session.append')] : []),
       ...(result.withheldMedia > 0 ? [metricsChange.media(result.withheldMedia)] : []),
     ];
     await record($, config, result.additions, changes.length > 0 ? combine(...changes) : undefined, result.notes);
-    return next({ ...e, message: { ...e.message, content: result.content } });
+    // A value first seen in a tool result is described right there, not a prompt later (main conversation only).
+    let content = result.content;
+    const last = content.findLastIndex(block => block.type === 'tool_result');
+    if (e.agentId === undefined && last !== -1) {
+      const fresh = await untoldNotes($, {}, {});
+      if (fresh.length > 0) {
+        const masker = createMasker(matching, await vaultNow($));
+        const note = legendText(fresh, MESSAGES.legendHeader, masker.mask);
+        await record($, config, masker.additions(), undefined, masker.notes());
+        content = content.map((block, index) => (index === last ? withNote(block, note) : block));
+        await markTold($, fresh);
+      }
+    }
+    return next({ ...e, message: { ...e.message, content } });
   }).catch(async ($, e, next) => {
     if (next.called) return next(e);
     await recordHookError($, config, 'session.append');
@@ -1166,6 +1195,15 @@ export const register: Register = (on, options) => {
     }
     return next({ ...e, message: { ...e.message, content } });
   });
+
+  // A compaction can drop the descriptions from the history: tell them again afterwards.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e);
+    if (config.enabled && e.agentId === undefined && !('skip' in result)) {
+      await update($, legend, current => ({ ...current, sent: {} }));
+    }
+    return result;
+  }).catch(($, e, next) => next(e)); // Only the reminder is lost: the compaction goes on.
 
   // Last gate before a request leaves: refuse to send when user-side content
   // still holds a detectable private value or unscannable media.

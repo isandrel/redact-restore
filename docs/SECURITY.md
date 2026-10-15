@@ -46,7 +46,7 @@ A hook that throws, returns a bad shape or overruns its budget is skipped unless
 ## Descriptions sent to the model
 
 - Label meanings in the system prompt are fixed text from `hooks/defaults.ts`; they name kinds of values, never values.
-- A per-rule description is text you write (or a scan suggests) and is sent to the model once per placeholder, as hidden prompt context. It is refused when it contains its own value (case-insensitive) or, for a pattern, when the pattern matches it, and it is masked like any other text before sending. A description can still say more than you intend (`our biggest client in Berlin`): write what kind of value it is, not facts about it.
+- A per-rule description is text you write (or a scan suggests) and is sent to the model once per placeholder (again after a compaction), as hidden prompt context or at the end of the tool result that first held the value. It is refused when it contains its own value (case-insensitive) or, for a pattern, when the pattern matches it, and it is masked like any other text before sending. A description can still say more than you intend (`our biggest client in Berlin`): write what kind of value it is, not facts about it.
 
 ## Placeholder ids
 

@@ -482,6 +482,42 @@ describe('descriptions', () => {
     expect(seen.context).toEqual([]);
   });
 
+  test('a value first seen in a tool result is described in that result', { options: {} }, async ($, on) => {
+    let stored: unknown;
+    on('session.append', ($, e, next) => {
+      stored = e.message.content;
+      return next(e);
+    });
+    harness(on, [], described);
+    await submit($, 'hello'); // Loads the saved rules, as session.start does.
+    await $.session
+      .append({
+        door: 'tool-result',
+        uuid: 'u1',
+        origin: { kind: 'tool', tool: 'Bash' },
+        message: {
+          type: 'user',
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 't1', content: `cat said ${SECRET}` }],
+        },
+      } as never)
+      .catch(() => undefined);
+    const text = JSON.stringify(stored);
+    expect(text).not.toContain(SECRET);
+    expect(text).toContain('internal codename of the launch');
+  });
+
+  test('after a compaction, descriptions are told again', { options: {} }, async ($, on) => {
+    const summary = { role: 'user', text: 'summary', toolUses: [] };
+    on('session.compact', () => ({ messages: [summary] }) as never);
+    const seen = harness(on, [], described);
+    await submit($, `Plan for ${SECRET}`);
+    expect(seen.context).toHaveLength(1);
+    await $.session.compact({ trigger: 'manual', messages: [summary] } as never);
+    await submit($, `Again ${SECRET}`);
+    expect(JSON.stringify(seen.context)).toContain('internal codename of the launch');
+  });
+
   test('the system note explains labels and the description note', configured, async ($, on) => {
     harness(on);
     on('prompt.compose', () => ({ sections: [] }));
