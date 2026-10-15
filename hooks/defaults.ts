@@ -10,6 +10,9 @@
 /** Shorter literals would shred ordinary text (single letters, common pairs). */
 export const MIN_CUSTOM_VALUE_LENGTH = 3;
 /** Text blocks the outbound audit remembers as clean (a very long session); past this it starts over. */
+/** Known-value segments kept compiled, and the size under which the newest values form one segment. */
+export const KNOWN_SEGMENT_CACHE = 64;
+export const KNOWN_SEGMENT_MIN = 64;
 export const AUDIT_MEMO_LIMIT = 50_000;
 /** Nesting depth walked when restoring tool input. */
 export const MAX_INPUT_DEPTH = 32;

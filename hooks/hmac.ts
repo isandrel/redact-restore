@@ -67,7 +67,7 @@ function sha256(data: Uint8Array): Uint8Array {
 /** HMAC-SHA-256 of `message` under `key`, as lowercase hex. */
 export function hmacSha256Hex(key: string, message: string): string {
   const encoder = new TextEncoder();
-  let keyBytes = encoder.encode(key);
+  let keyBytes: Uint8Array = encoder.encode(key);
   if (keyBytes.length > BLOCK) keyBytes = sha256(keyBytes);
   const inner = new Uint8Array(BLOCK);
   const outer = new Uint8Array(BLOCK);

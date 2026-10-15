@@ -1,7 +1,7 @@
 /** Pure matching code: never logs, stores, or transmits matched values. */
 import { DEFAULT_SCHEME, isUsableAlias, type PlaceholderScheme, type ValueRule } from './placeholder.ts';
 import { selectDetectors, type Detector } from './detectors.ts';
-import { MIN_CUSTOM_VALUE_LENGTH } from './defaults.ts';
+import { KNOWN_SEGMENT_CACHE, KNOWN_SEGMENT_MIN, MIN_CUSTOM_VALUE_LENGTH } from './defaults.ts';
 
 /** A placeholder label: `CUSTOM`, `EMAIL`, a detector's label, or a user's label. */
 export type PrivacyCategory = string;
@@ -170,45 +170,84 @@ export function findEmails(text: string): Array<{ start: number; end: number }> 
   return found;
 }
 
-/** Ranges of existing placeholders and known tokens (aliases too), never masked again. */
 /**
  * Compiled matchers for the session's known values and tokens. The vault only
- * grows within a session (a /clear starts a new one), so its size and its first
- * and last entries identify a version: a large vault is compiled once per
- * change, not once per message.
+ * grows (a /clear starts a new one), so its values are compiled in segments
+ * whose sizes are powers of two, like a binary counter: adding a value
+ * recompiles only small segments, and a large vault is never compiled whole
+ * again for one new value. Matching runs one regex per segment (a handful).
  */
 interface KnownIndex {
-  readonly values?: RegExp;
+  readonly values: readonly RegExp[];
   readonly category: ReadonlyMap<string, PrivacyCategory>;
+  /** Tokens the placeholder format does not cover: aliases and older formats. */
   readonly tokens?: RegExp;
 }
-// A few versions at once: the audit alternates between the whole vault and the part added since.
-const knownIndexCache = new Map<string, KnownIndex>();
-const KNOWN_INDEX_SLOTS = 4;
 
-function knownIndex(known: readonly KnownValue[], tokens: readonly string[]): KnownIndex {
-  const key = [
-    known.length,
-    tokens.length,
-    known[0]?.value,
-    known[known.length - 1]?.value,
-    tokens[0],
-    tokens[tokens.length - 1],
-  ].join('\u0000');
-  const cached = knownIndexCache.get(key);
-  if (cached) return cached;
-  const category = new Map(known.map(entry => [entry.value, entry.category]));
-  const index: KnownIndex = {
-    category,
-    ...(category.size ? { values: compileLiterals([...category.keys()], false) } : {}),
-    ...(tokens.length ? { tokens: compileLiterals(tokens, false) } : {}),
-  };
-  if (knownIndexCache.size >= KNOWN_INDEX_SLOTS) {
-    const oldest = knownIndexCache.keys().next().value;
-    if (oldest !== undefined) knownIndexCache.delete(oldest);
+const segmentCache = new Map<string, RegExp>();
+
+/** One segment's alternation, cached by position and content; least recently used first out. */
+function segment(values: readonly string[], start: number, end: number): RegExp {
+  const key = `${start}\u0000${end}\u0000${values[start]}\u0000${values[end - 1]}`;
+  let pattern = segmentCache.get(key);
+  if (pattern) segmentCache.delete(key);
+  else pattern = compileLiterals(values.slice(start, end), false);
+  segmentCache.set(key, pattern);
+  if (segmentCache.size > KNOWN_SEGMENT_CACHE) {
+    const oldest = segmentCache.keys().next().value;
+    if (oldest !== undefined) segmentCache.delete(oldest);
   }
-  knownIndexCache.set(key, index);
-  return index;
+  return pattern;
+}
+
+function segments(values: readonly string[]): RegExp[] {
+  const found: RegExp[] = [];
+  let start = 0;
+  let size = 1;
+  while (size * 2 <= values.length) size *= 2;
+  for (; start < values.length; size = Math.max(1, size / 2)) {
+    const rest = values.length - start;
+    // The tail under the smallest segment size is compiled as one piece.
+    if (rest <= KNOWN_SEGMENT_MIN) {
+      found.push(segment(values, start, values.length));
+      break;
+    }
+    if (size <= rest) {
+      found.push(segment(values, start, start + size));
+      start += size;
+    }
+  }
+  return found;
+}
+
+// Lookups derived from one known list (the vault view caches the list itself).
+const knownLookups = new WeakMap<
+  readonly KnownValue[],
+  { readonly values: readonly string[]; readonly category: ReadonlyMap<string, PrivacyCategory> }
+>();
+const tokenPatterns = new WeakMap<readonly string[], { readonly format: string; readonly pattern?: RegExp }>();
+
+function knownIndex(known: readonly KnownValue[], tokens: readonly string[], scheme: PlaceholderScheme): KnownIndex {
+  let lookup = knownLookups.get(known);
+  if (!lookup) {
+    lookup = {
+      values: known.map(entry => entry.value),
+      category: new Map(known.map(entry => [entry.value, entry.category])),
+    };
+    knownLookups.set(known, lookup);
+  }
+  let literal = tokenPatterns.get(tokens);
+  if (literal?.format !== scheme.format) {
+    // Placeholders of the active format are found by the format's own pattern.
+    const others = tokens.filter(token => scheme.labelOf(token) === undefined);
+    literal = { format: scheme.format, ...(others.length ? { pattern: compileLiterals(others, false) } : {}) };
+    tokenPatterns.set(tokens, literal);
+  }
+  return {
+    values: lookup.values.length ? segments(lookup.values) : [],
+    category: lookup.category,
+    ...(literal.pattern ? { tokens: literal.pattern } : {}),
+  };
 }
 
 /** The custom values split by case handling, compiled once per options object. */
@@ -257,7 +296,7 @@ export function findPrivateMatches(
 ): PrivateMatch[] {
   if (text.length === 0) return [];
   const candidates: PrivateMatch[] = [];
-  const index = knownIndex(known, knownTokens);
+  const index = knownIndex(known, knownTokens, options.placeholders ?? DEFAULT_SCHEME);
   if (index.tokens) index.tokens.lastIndex = 0;
   const guarded = protectedRanges(text, options.placeholders ?? DEFAULT_SCHEME, index.tokens);
 
@@ -280,8 +319,7 @@ export function findPrivateMatches(
   // Values already in the vault stay masked even after a config change or when a
   // detector would not find them again (e.g. an Edit result echoing restored text).
   const knownCategory = index.category;
-  const knownPattern = index.values;
-  if (knownPattern) {
+  for (const knownPattern of index.values) {
     knownPattern.lastIndex = 0;
     for (const match of text.matchAll(knownPattern)) {
       candidates.push({

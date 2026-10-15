@@ -104,22 +104,27 @@ function valueSpan(text: string, rawStart: number, raw: string, comments: boolea
 export function envAssignments(text: string): Array<{ key: string; value: string; start: number; end: number }> {
   if (!text.includes('=')) return [];
   const found: Array<{ key: string; value: string; start: number; end: number }> = [];
-  const taken: Array<{ start: number; end: number }> = [];
-  const add = (key: string, span: { start: number; end: number }) => {
-    const value = text.slice(span.start, span.end);
-    if (!envValueWorthMasking(value) || taken.some(t => span.start < t.end && t.start < span.end)) return;
-    taken.push(span);
-    found.push({ key, value, ...span });
-  };
+  // Whole-line spans, in text order; an inline match inside one is skipped. Both
+  // lists run forward, so one pointer checks overlap in linear time.
+  const lines: Array<{ start: number; end: number }> = [];
   ENV_LINE.lastIndex = 0;
   for (let match = ENV_LINE.exec(text); match; match = ENV_LINE.exec(text)) {
     const raw = match[2] ?? '';
-    add(match[1] ?? '', valueSpan(text, match.index + match[0].length - raw.length, raw, true));
+    const span = valueSpan(text, match.index + match[0].length - raw.length, raw, true);
+    const value = text.slice(span.start, span.end);
+    if (!envValueWorthMasking(value)) continue;
+    lines.push(span);
+    found.push({ key: match[1] ?? '', value, ...span });
   }
+  let line = 0;
   ENV_INLINE.lastIndex = 0;
   for (let match = ENV_INLINE.exec(text); match; match = ENV_INLINE.exec(text)) {
     const raw = match[2] ?? '';
-    add(match[1] ?? '', valueSpan(text, match.index + match[0].length - raw.length, raw, false));
+    const span = valueSpan(text, match.index + match[0].length - raw.length, raw, false);
+    while (line < lines.length && (lines[line]?.end ?? 0) <= span.start) line += 1;
+    if (line < lines.length && (lines[line]?.start ?? Infinity) < span.end) continue;
+    const value = text.slice(span.start, span.end);
+    if (envValueWorthMasking(value)) found.push({ key: match[1] ?? '', value, ...span });
   }
   return found.sort((a, b) => a.start - b.start);
 }
@@ -664,13 +669,14 @@ export function gitleaksDetector(ruleIds: ReadonlySet<string>): Detector {
     rank: 2,
     find(text) {
       const rules = gitleaksRules().filter(compiled => ruleIds.has(compiled.rule.id));
-      const lower = text.toLowerCase();
+      const hits = keywordHits(text.toLowerCase());
       const found: Span[] = [];
       for (const compiled of rules) {
         const { keywords, secretGroup, label } = compiled.rule;
         // gitleaks runs a rule only where a keyword appears; scanning just the
         // windows around those hits keeps large inputs fast.
-        const windows = keywords.length > 0 ? keywordWindows(lower, keywords) : [{ start: 0, end: text.length }];
+        const windows =
+          keywords.length > 0 ? keywordWindows(hits, keywords, text.length) : [{ start: 0, end: text.length }];
         for (const window of windows) {
           const slice = text.slice(window.start, window.end);
           compiled.pattern.lastIndex = 0;
@@ -703,14 +709,44 @@ const WINDOW_BEFORE = KEYWORD_WINDOW_BEFORE;
 const WINDOW_AFTER = KEYWORD_WINDOW_AFTER;
 const RESCAN_LIMIT = KEYWORD_RESCAN_LIMIT;
 
+/**
+ * Every gitleaks keyword in one pass: a lookahead alternation reports the
+ * longest keyword at each position, and the keywords that are its prefixes
+ * start there too. One regex over the text instead of one search per keyword.
+ */
+let keywordScan: { readonly pattern: RegExp; readonly prefixes: ReadonlyMap<string, readonly string[]> } | undefined;
+function keywordHits(lower: string): ReadonlyMap<string, readonly number[]> {
+  if (!keywordScan) {
+    const all = [...new Set(GITLEAKS_RULES.flatMap(rule => rule.keywords))].sort((a, b) => b.length - a.length);
+    const escape = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    keywordScan = {
+      pattern: new RegExp(`(?=(${all.map(escape).join('|')}))`, 'g'),
+      prefixes: new Map(all.map(word => [word, all.filter(other => word.startsWith(other))])),
+    };
+  }
+  const hits = new Map<string, number[]>();
+  for (const match of lower.matchAll(keywordScan.pattern)) {
+    for (const word of keywordScan.prefixes.get(match[1] ?? '') ?? []) {
+      const list = hits.get(word);
+      if (list) list.push(match.index);
+      else hits.set(word, [match.index]);
+    }
+  }
+  return hits;
+}
+
 /** Merged windows around every keyword occurrence, or none when no keyword appears. */
-function keywordWindows(lower: string, keywords: readonly string[]): Span[] {
+function keywordWindows(
+  hits: ReadonlyMap<string, readonly number[]>,
+  keywords: readonly string[],
+  length: number,
+): Span[] {
   const windows: Span[] = [];
   for (const keyword of keywords) {
-    for (let at = lower.indexOf(keyword); at !== -1; at = lower.indexOf(keyword, at + keyword.length)) {
+    for (const at of hits.get(keyword) ?? []) {
       windows.push({
         start: Math.max(0, at - WINDOW_BEFORE),
-        end: Math.min(lower.length, at + keyword.length + WINDOW_AFTER),
+        end: Math.min(length, at + keyword.length + WINDOW_AFTER),
       });
     }
   }

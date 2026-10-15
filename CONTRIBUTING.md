@@ -65,13 +65,14 @@ That first interactive session also writes the engine's type declarations to `.c
 
 ### Commands
 
-| Command                                             | What it does                                                                      |
-| --------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `bun run check`                                     | Strict `tsc` for the mod (engine declarations) and the Bun tooling (`@types/bun`) |
-| `claude plugin test .`                              | Unit and integration tests with `claude-code/testing`                             |
-| `claude plugin validate .claude-plugin/plugin.json` | Manifest and hooks module, as the engine reads them                               |
-| `bun run format` / `bun run format:check`           | Biome (TypeScript, JSON) and dprint (Markdown)                                    |
-| `bun run sync-gitleaks [tag]`                       | Regenerate the vendored gitleaks rules                                            |
+| Command                                             | What it does                                                                                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run check`                                     | Strict `tsc` for the mod (engine declarations) and the Bun tooling (`@types/bun`)                                                                  |
+| `claude plugin test .`                              | Unit and integration tests with `claude-code/testing`                                                                                              |
+| `bun run bench`                                     | Timing of the masking paths on synthetic data (1 MB tool output, 10,000-value vault, per-detector cost); run before and after a change to matching |
+| `claude plugin validate .claude-plugin/plugin.json` | Manifest and hooks module, as the engine reads them                                                                                                |
+| `bun run format` / `bun run format:check`           | Biome (TypeScript, JSON) and dprint (Markdown)                                                                                                     |
+| `bun run sync-gitleaks [tag]`                       | Regenerate the vendored gitleaks rules                                                                                                             |
 
 ## 🗂️ Project Layout
 

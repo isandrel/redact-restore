@@ -12,6 +12,10 @@ import { CUSTOM_LABEL, DEFAULT_SCHEME, type PlaceholderScheme } from './placehol
  * No Claude Code $ API is imported or passed here: its static validator forbids
  * passing $ into functions imported from other local files.
  */
+/**
+ * Placeholder to original value. A vault is never changed in place: every
+ * addition makes a new object, so lookups built from one can be cached by identity.
+ */
 export type Vault = Record<string, string>;
 
 /** Placeholder to description ("client company name"), for the model; never a value. */
@@ -45,7 +49,30 @@ function categoryOf(token: string, scheme: PlaceholderScheme): PrivacyCategory {
 }
 
 export function knownValues(vault: Vault, scheme: PlaceholderScheme = DEFAULT_SCHEME): KnownValue[] {
-  return Object.entries(vault).map(([token, value]) => ({ value, category: categoryOf(token, scheme) }));
+  return [...vaultView(vault, scheme).known];
+}
+
+interface VaultView {
+  readonly known: readonly KnownValue[];
+  readonly tokens: readonly string[];
+  /** Value to its placeholder. */
+  readonly reverse: ReadonlyMap<string, string>;
+}
+
+// Built once per vault object and format: a large session masks many texts against one vault.
+const vaultViews = new WeakMap<Vault, { readonly format: string; readonly view: VaultView }>();
+
+function vaultView(vault: Vault, scheme: PlaceholderScheme): VaultView {
+  const cached = vaultViews.get(vault);
+  if (cached?.format === scheme.format) return cached.view;
+  const entries = Object.entries(vault);
+  const view: VaultView = {
+    known: entries.map(([token, value]) => ({ value, category: categoryOf(token, scheme) })),
+    tokens: entries.map(([token]) => token),
+    reverse: new Map(entries.map(([token, value]) => [value, token])),
+  };
+  vaultViews.set(vault, { format: scheme.format, view });
+  return view;
 }
 
 function escapeRegExp(value: string): string {
@@ -97,7 +124,8 @@ export function uniqueMatches(
   const scheme = options.placeholders ?? DEFAULT_SCHEME;
   const seen = new Set<string>();
   const found: Array<{ label: string; value: string }> = [];
-  for (const match of findPrivateMatches(text, options, knownValues(vault, scheme), Object.keys(vault))) {
+  const view = vaultView(vault, scheme);
+  for (const match of findPrivateMatches(text, options, view.known, view.tokens)) {
     if (seen.has(match.value)) continue;
     seen.add(match.value);
     found.push({ label: options.rules?.get(match.value.toLowerCase())?.label ?? match.category, value: match.value });
@@ -106,24 +134,42 @@ export function uniqueMatches(
 }
 
 export function maskText(text: string, options: MatchingOptions, vault: Vault): MaskResult {
+  return maskAgainst(text, options, vault, NO_PENDING);
+}
+
+/**
+ * Placeholders a masker minted for earlier texts, kept apart from the vault so
+ * the vault's cached lookups stay valid. Their values are found again by the
+ * same rules and detectors that found them first.
+ */
+interface Pending {
+  readonly tokens: Vault;
+  readonly byValue: ReadonlyMap<string, string>;
+}
+const NO_PENDING: Pending = { tokens: {}, byValue: new Map() };
+
+function maskAgainst(text: string, options: MatchingOptions, vault: Vault, pending: Pending): MaskResult {
   const scheme = options.placeholders ?? DEFAULT_SCHEME;
-  const matches = findPrivateMatches(text, options, knownValues(vault, scheme), Object.keys(vault));
+  const view = vaultView(vault, scheme);
+  const matches = findPrivateMatches(text, options, view.known, view.tokens);
   if (matches.length === 0) return { text, additions: {}, notes: {}, count: 0 };
 
-  const reverse = new Map(Object.entries(vault).map(([token, value]) => [value, token]));
+  const reverse = view.reverse;
+  // Values first masked in this text; the cached view stays as it was.
+  const added = new Map<string, string>();
   const additions: Vault = {};
   const notes: Notes = {};
   const fragments: string[] = [];
   let last = 0;
 
   for (const match of matches) {
-    let token = reverse.get(match.value);
+    let token = reverse.get(match.value) ?? pending.byValue.get(match.value) ?? added.get(match.value);
     if (!token) {
       const rule = options.rules?.get(match.value.toLowerCase());
       if (rule?.alias !== undefined) {
         // One alias per configured value; a case variant reuses it.
         token = rule.alias;
-        if (vault[token] === undefined && additions[token] === undefined) {
+        if (vault[token] === undefined && pending.tokens[token] === undefined && additions[token] === undefined) {
           additions[token] = match.value;
           if (rule.description) notes[token] = rule.description;
         }
@@ -131,13 +177,13 @@ export function maskText(text: string, options: MatchingOptions, vault: Vault): 
         const label = rule?.label ?? match.category;
         token = scheme.make(label, match.value);
         // A stable id that another value already holds (a truncated-hash collision) falls back to random.
-        const holder = vault[token] ?? additions[token];
+        const holder = vault[token] ?? pending.tokens[token] ?? additions[token];
         if (holder !== undefined && holder !== match.value) token = scheme.make(label);
         additions[token] = match.value;
         const description = rule?.description ?? match.description;
         if (description) notes[token] = description;
       }
-      reverse.set(match.value, token);
+      added.set(match.value, token);
     }
     fragments.push(text.slice(last, match.start), token);
     last = match.end;
@@ -270,15 +316,18 @@ export function createStreamRestorer(vault: Vault, scheme: PlaceholderScheme = D
 
 /** Masks several strings against one evolving vault, collecting new mappings. */
 export function createMasker(options: MatchingOptions, vault: Vault) {
-  const working: Vault = { ...vault };
   const additions: Vault = {};
+  const byValue = new Map<string, string>();
+  const pending: Pending = { tokens: additions, byValue };
   const notes: Notes = {};
   let count = 0;
   return {
     mask(text: string): string {
-      const masked = maskText(text, options, working);
-      Object.assign(working, masked.additions);
-      Object.assign(additions, masked.additions);
+      const masked = maskAgainst(text, options, vault, pending);
+      for (const [token, value] of Object.entries(masked.additions)) {
+        additions[token] = value;
+        byValue.set(value, token);
+      }
       Object.assign(notes, masked.notes);
       count += masked.count;
       return masked.text;
@@ -443,8 +492,7 @@ export function auditMessages(
   policy: BlockPolicy,
   memo?: AuditMemo,
 ): AuditFinding[] {
-  const known = knownValues(vault, options.placeholders);
-  const tokens = Object.keys(vault);
+  const { known, tokens } = vaultView(vault, options.placeholders ?? DEFAULT_SCHEME);
   const findings: AuditFinding[] = [];
   const recheck = knownOnly(options);
   // The first match in a part, scanning only what the memo has not seen yet.

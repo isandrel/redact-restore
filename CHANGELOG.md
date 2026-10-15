@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Faster in large sessions: 1 MB of tool output masks in about 60 ms instead of 160 ms (gitleaks keywords found in one pass, a quadratic overlap check in the `KEY=value` detector removed), and a vault of 10,000 values no longer recompiles for every new value (masking 300 rows went from 23 s to 0.2 s). `bun run bench` measures it.
 - `/resume` keeps working: each session's placeholder map is kept in a local file (`persist_session_map`, on by default; folder 700, file 600 where the system allows) and loaded again after a resume, so earlier placeholders still show and restore. Files untouched for `session_map_days` (30) are deleted.
 - `restore_streaming` is on by default: replies show original values while they stream, not only once complete.
 - Descriptions: tell the model what a value is without the value. The placeholder note explains common labels (static, so the prompt cache keeps hitting), and saved values and patterns can carry a description (`client company name`), sent once per placeholder as hidden prompt context, or at the end of the tool result where the value first appears, and again after a compaction. Descriptions are checked and masked locally; scans suggest one from where they found the value; export and import carry them.

@@ -9,7 +9,8 @@
     "sync-gitleaks": "bun scripts/sync-gitleaks.ts",
     "format": "biome format --write . && dprint fmt",
     "format:check": "biome format . && dprint check",
-    "release-notes": "bun scripts/release-notes.ts"
+    "release-notes": "bun scripts/release-notes.ts",
+    "bench": "bun scripts/bench.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
