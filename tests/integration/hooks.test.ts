@@ -1,5 +1,6 @@
 // Hook integration tests through the engine's own dispatch. Synthetic values only.
 import { describe, expect, mock, test, type TestBody } from 'claude-code/testing';
+import { hmacSha256Hex } from '../../hooks/hmac.ts';
 
 type Engine = Parameters<TestBody>[0];
 type On = Parameters<TestBody>[1];
@@ -447,6 +448,26 @@ describe('local restoration', () => {
       props: { text: token, origin: { kind: 'composer' }, isExpanded: false },
     } as never);
     expect(seen.drawn).toEqual([token]);
+  });
+});
+
+describe('stable placeholder ids', () => {
+  const stable = { options: { ...base, placeholder_ids: 'stable' } };
+  const KEY = 'ab'.repeat(32);
+
+  test('stable ids come from the stored key: the same value gets the same placeholder', stable, async ($, on) => {
+    const seen = harness(on, [], { 'placeholder-id-key': KEY });
+    await submit($, `Ask about ${SECRET}`);
+    const id = hmacSha256Hex(KEY, `CUSTOM\u0000${SECRET}`).slice(0, 12);
+    expect(seen.prompt).toBe(`Ask about {{PRIVATE:CUSTOM#${id}}}`);
+  });
+
+  test('without a stored key, one is made and used', stable, async ($, on) => {
+    const seen = harness(on);
+    await submit($, SECRET);
+    const first = seen.prompt;
+    expect(first).toMatch(PLACEHOLDER);
+    expect(first).not.toContain(SECRET);
   });
 });
 

@@ -11,11 +11,13 @@
  * found in running text and recognized while it streams in pieces; it ends
  * with literal text or with the fixed-length `{id}`.
  */
+import { hmacSha256Hex } from './hmac.ts';
 import {
   CUSTOM_LABEL,
   DEFAULT_FORMAT,
   DEFAULT_ID_LENGTH,
   EMAIL_LABEL,
+  ID_KEY_BYTES,
   MAX_ID_LENGTH,
   MIN_ID_LENGTH,
 } from './defaults.ts';
@@ -28,8 +30,14 @@ export const LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 export interface PlaceholderScheme {
   readonly format: string;
   readonly idLength: number;
-  /** A fresh placeholder for a label. */
-  make(label: string): string;
+  /**
+   * A placeholder for a label. With a stable-id key and a value, the id is
+   * derived from both, so the value gets the same placeholder in every session;
+   * otherwise it is random.
+   */
+  make(label: string, value?: string): string;
+  /** Whether ids are derived from values (`placeholder_ids: stable`) and the key is loaded. */
+  readonly stableIds: boolean;
   /** Every placeholder of this format (global regex; reset `lastIndex` yourself). */
   readonly pattern: RegExp;
   /** The label inside a placeholder of this format, or undefined. */
@@ -57,13 +65,30 @@ export function formatProblem(format: string): string | undefined {
   return undefined;
 }
 
+/** A key for stable ids: 64 hex characters. */
+export function isIdKey(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+export function newIdKey(): string {
+  return randomHex(ID_KEY_BYTES * 2);
+}
+
 function randomHex(length: number): string {
   let hex = '';
   while (hex.length < length) hex += crypto.randomUUID().replaceAll('-', '');
   return hex.slice(0, length);
 }
 
-export function createScheme(format = DEFAULT_FORMAT, idLength = DEFAULT_ID_LENGTH): PlaceholderScheme {
+/**
+ * `stableKey` returns the local key for stable ids, or undefined (not loaded,
+ * or ids are random): placeholders are then random.
+ */
+export function createScheme(
+  format = DEFAULT_FORMAT,
+  idLength = DEFAULT_ID_LENGTH,
+  stableKey?: () => string | undefined,
+): PlaceholderScheme {
   const usable = formatProblem(format) === undefined ? format : DEFAULT_FORMAT;
   const length = Math.min(MAX_ID_LENGTH, Math.max(MIN_ID_LENGTH, Math.round(idLength)));
   const parts = usable.split(/(\{(?:id|label)\})/);
@@ -84,7 +109,15 @@ export function createScheme(format = DEFAULT_FORMAT, idLength = DEFAULT_ID_LENG
   return {
     format: usable,
     idLength: length,
-    make: label => usable.replace('{label}', label).replace('{id}', randomHex(length)),
+    make(label, value) {
+      const key = value === undefined ? undefined : stableKey?.();
+      // The label is part of the input: one value under two labels gets two ids.
+      const id = key ? hmacSha256Hex(key, `${label}\u0000${value}`).slice(0, length) : randomHex(length);
+      return usable.replace('{label}', label).replace('{id}', id);
+    },
+    get stableIds() {
+      return stableKey?.() !== undefined;
+    },
     pattern: new RegExp(source, 'g'),
     labelOf(token) {
       const match = whole.exec(token);

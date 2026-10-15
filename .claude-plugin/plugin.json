@@ -69,6 +69,13 @@
       "description": "Random hex characters per placeholder, 8 to 32. Default 12 keeps placeholders short and unique within a session.",
       "default": 12
     },
+    "placeholder_ids": {
+      "type": "string",
+      "title": "Placeholder ids across sessions",
+      "description": "random: a value gets a new placeholder in each session. stable: the same value gets the same placeholder in every session (derived from a key kept in the plugin store on this machine), so the provider can tell that two sessions mention the same value, though not what it is.",
+      "options": ["random", "stable"],
+      "default": "random"
+    },
     "restore_display": {
       "type": "boolean",
       "title": "Restore local message display",

@@ -119,7 +119,11 @@ export function maskText(text: string, options: MatchingOptions, vault: Vault): 
         token = rule.alias;
         if (vault[token] === undefined && additions[token] === undefined) additions[token] = match.value;
       } else {
-        token = scheme.make(rule?.label ?? match.category);
+        const label = rule?.label ?? match.category;
+        token = scheme.make(label, match.value);
+        // A stable id that another value already holds (a truncated-hash collision) falls back to random.
+        const holder = vault[token] ?? additions[token];
+        if (holder !== undefined && holder !== match.value) token = scheme.make(label);
         additions[token] = match.value;
       }
       reverse.set(match.value, token);

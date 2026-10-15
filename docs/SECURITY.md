@@ -43,9 +43,14 @@ A hook that throws, returns a bad shape or overruns its budget is skipped unless
 | `tool.call` (Write/Edit/NotebookEdit) | Operation denied                                                                   |
 | `ui.render`                           | No `.catch`: the engine draws its own row, so placeholders stay visible (safe)     |
 
+## Placeholder ids
+
+- `placeholder_ids: random` (default): ids are random per session; placeholders in different sessions cannot be linked.
+- `placeholder_ids: stable`: ids are a truncated HMAC-SHA-256 of label and value under a local 256-bit key in the plugin store. The provider can link the same value across sessions, not read it. Whoever holds the key can confirm a guessed value. A collision falls back to a random id.
+
 ## Local restoration
 
-- **Display:** `ui.render` rewrites `UserMessage` and `AssistantMessage` text only on screen. The stored message and the model's view keep placeholders (verified in the CLI transcript).
+- **Display:** `ui.render` rewrites the rows in `restore_display_rows` (messages, tool rows, tool results, questions) only on screen. The stored message and the model's view keep placeholders (verified in the CLI transcript).
 - **Streaming (`restore_streaming`, default off):** restores placeholders in the reply's text chunks as they stream (main loop only; a placeholder split across chunks is held back until complete). The engine records rewritten stream text, so the response row briefly holds originals before `session.append` masks it again with the vault's known values. Verified live: stored assistant rows held placeholders only and the next request carried placeholders. Off by default because it relies on that re-mask.
 - **Tools (`restore_mode`, default `all`):** every tool input is walked and known placeholders are restored, so `Bash`, `Write`, `Edit`, `Grep`, `Read` and local MCP tools get originals. Verified live: `echo` wrote originals to disk, `grep` matched the restored pattern, and the output came back to the model masked. An unknown placeholder denies the call.
 - **Kept on placeholders (built in, `keep_tools` adds more):** `Agent`, `Task`, `Workflow`, `WebFetch` (its prompt and page go to a summarizing model), `WebSearch` (runs server-side), `SendMessage`, `Skill`, `RemoteTrigger`, `CronCreate`, `ScheduleWakeup` (later prompts or cloud agents), and `SendFeedback`, `PushNotification`, `Artifact`, `ArtifactData`, `ArtifactComments` (sent to Anthropic services). Options cannot remove these, so a misconfiguration cannot hand values to a model. Verified live: a subagent received placeholders only.

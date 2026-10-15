@@ -10,6 +10,9 @@ import {
   SCAN_SKIP_DIRS,
   DISPLAY_ROWS,
   type DisplayRow,
+  DEFAULT_ID_MODE,
+  PLACEHOLDER_ID_MODES,
+  type PlaceholderIdMode,
 } from './defaults.ts';
 import {
   createScheme,
@@ -38,6 +41,8 @@ export interface RedactRestoreConfig {
   /** Why `placeholder_format` was rejected (the default is used), or undefined. */
   readonly formatProblem: string | undefined;
   readonly placeholders: PlaceholderScheme;
+  /** `placeholder_ids`: random per session, or stable across sessions. */
+  readonly placeholderIds: PlaceholderIdMode;
   readonly restoreDisplay: boolean;
   /** Rendered rows restored for display (`restore_display_rows`). */
   readonly displayRows: readonly DisplayRow[];
@@ -99,7 +104,8 @@ function ruleLabels(value: RawOptions[string] | undefined): readonly string[] {
 }
 
 /** Defaults mirror plugin.json and lean to the safe side when a value is missing. */
-export function parseConfig(options: RawOptions): RedactRestoreConfig {
+/** `stableKey` supplies the local key once loaded; it is used only when `placeholder_ids` is `stable`. */
+export function parseConfig(options: RawOptions, stableKey?: () => string | undefined): RedactRestoreConfig {
   const custom = normalizeCustomValues(stringList(options.custom_values));
   const caseInsensitive = flag(options, 'custom_case_insensitive', false);
   // Each custom_patterns entry is one regex source, used whole: nothing in it is parsed.
@@ -114,7 +120,8 @@ export function parseConfig(options: RawOptions): RedactRestoreConfig {
       : DEFAULT_FORMAT;
   const idLength =
     typeof options.placeholder_id_length === 'number' ? options.placeholder_id_length : DEFAULT_ID_LENGTH;
-  const placeholders = createScheme(format, idLength);
+  const placeholderIds = PLACEHOLDER_ID_MODES.find(mode => mode === options.placeholder_ids) ?? DEFAULT_ID_MODE;
+  const placeholders = createScheme(format, idLength, placeholderIds === 'stable' ? stableKey : undefined);
   const selection = selectDetectors(
     patterns(options, 'enable_detectors', []).map(name => name.toLowerCase()),
     patterns(options, 'disable_detectors', []).map(name => name.toLowerCase()),
@@ -139,6 +146,7 @@ export function parseConfig(options: RawOptions): RedactRestoreConfig {
     invalidPatterns: patternEntries.length - optionPatterns.length,
     formatProblem: formatProblem(format),
     placeholders,
+    placeholderIds,
     restoreDisplay: flag(options, 'restore_display', true),
     displayRows: displayRows(patterns(options, 'restore_display_rows', DISPLAY_ROWS)),
     restoreStreaming: flag(options, 'restore_streaming', false),

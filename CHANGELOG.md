@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `placeholder_ids` option: `random` (default) gives a value a new placeholder in each session; `stable` gives the same value the same placeholder in every session, from a local key in the plugin store (HMAC-SHA-256). The docs list where Redact Restore keeps data.
 - Tool rows, tool results and `AskUserQuestion` dialogs show original values on screen, like messages. Rows to restore are listed in one table in `hooks/defaults.ts` and chosen with the new `restore_display_rows` option.
 - Pattern rules: mask every match of your own regular expression, from the rules form (pattern, example it must match, label, ignore case, whole word, mask the whole match or one group) or the `custom_patterns` option. JavaScript cannot time out a regex, so patterns use a safe subset checked without running them (no backreferences, lookarounds or repeated groups, at most 2 open-ended repeats, a required keyword) and run only near their keyword. They are exported and imported as fields; `import --replace` replaces saved patterns only when the file has a `patterns` list.
 - Exact values can ignore case on their own, overriding `custom_case_insensitive` either way.

@@ -10,6 +10,7 @@ import {
   PANE_TITLE,
   SCAN_LOG_AUTHORS,
   DISPLAY_RESTORE_FIELDS,
+  ID_KEY_STORE_KEY,
   type DisplayRow,
   SCAN_MAX_DEPTH,
   SCAN_MAX_DIRS,
@@ -74,7 +75,7 @@ import {
 } from './scan.ts';
 import { formatStatus, statusFileContent, statusStats } from './status.ts';
 import { combine, emptyMetrics, metricsChange, type Metrics, type MetricsChange } from './metrics.ts';
-import { CUSTOM_LABEL, EMAIL_LABEL } from './placeholder.ts';
+import { CUSTOM_LABEL, EMAIL_LABEL, isIdKey, newIdKey } from './placeholder.ts';
 import { keptTools, toolAction, type RestorePolicy } from './policy.ts';
 import {
   auditMessages,
@@ -212,6 +213,8 @@ interface Context {
   readonly config: RedactRestoreConfig;
   /** Rules from the plugin options (keychain), normalized. */
   readonly optionRules: readonly ValueRule[];
+  /** The local key for stable placeholder ids, once loaded (`placeholder_ids: stable`). */
+  readonly idKey: { value?: string };
 }
 
 /**
@@ -273,7 +276,27 @@ function matchingFor(
 }
 
 async function currentMatching($: EngineInterface, ctx: Context): Promise<MatchingOptions> {
+  await ensureIdKey($, ctx);
   return matchingFor(ctx, await read($, rules), await read($, patterns));
+}
+
+/**
+ * Loads the key for stable ids from the plugin store, or makes one. Until it
+ * loads (or if the store fails), placeholders are random: never less private.
+ */
+async function ensureIdKey($: EngineInterface, ctx: Context): Promise<void> {
+  if (ctx.config.placeholderIds !== 'stable' || ctx.idKey.value !== undefined) return;
+  try {
+    let key = await $.store.get(ID_KEY_STORE_KEY);
+    if (!isIdKey(key)) {
+      await $.store.set(ID_KEY_STORE_KEY, newIdKey());
+      // Read back: two sessions starting together adopt the key written last.
+      key = await $.store.get(ID_KEY_STORE_KEY);
+    }
+    if (isIdKey(key)) ctx.idKey.value = key;
+  } catch {
+    // Random ids for now; the next masking tries again.
+  }
 }
 
 /** For fallbacks, which may not call $: the last merged rules, a superset of the options. */
@@ -782,10 +805,11 @@ async function openPane($: EngineInterface, view: PaneView['view']): Promise<voi
 export const register: Register = (on, options) => {
   // Sensitive custom_values come from Claude Code's secure userConfig flow.
   // Never log their originals or insert them into files, prompts, or diagnostics.
-  const config = parseConfig(options);
+  const idKey: { value?: string } = {};
+  const config = parseConfig(options, () => idKey.value);
   const { matching } = config;
   const policy = { allowMedia: config.allowMedia };
-  const ctx: Context = { config, optionRules: [...(matching.rules?.values() ?? [])] };
+  const ctx: Context = { config, optionRules: [...(matching.rules?.values() ?? [])], idKey };
 
   on('session.start', async ($, e, next) => {
     // Also fires after a reload or an option change: redraw with the new settings.
@@ -852,6 +876,7 @@ export const register: Register = (on, options) => {
       await recordHookError($, config, 'rules');
       return { drop: MESSAGES.rulesUnreadable };
     }
+    await ensureIdKey($, ctx);
     const masker = createMasker(matchingFor(ctx, stored, await read($, patterns)), await vaultNow($));
     const text = masker.mask(e.text);
     const context = e.context?.map(item => masker.mask(item));

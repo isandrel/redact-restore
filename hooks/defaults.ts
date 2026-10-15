@@ -28,6 +28,16 @@ export const DEFAULT_FORMAT = '{{PRIVATE:{label}#{id}}}';
 export const DEFAULT_ID_LENGTH = 12;
 export const MIN_ID_LENGTH = 8;
 export const MAX_ID_LENGTH = 32;
+/**
+ * How placeholder ids are made. random: new per session. stable: the same value
+ * gets the same id in every session, derived with a local key (HMAC-SHA-256).
+ */
+export const PLACEHOLDER_ID_MODES = ['random', 'stable'] as const;
+export type PlaceholderIdMode = (typeof PLACEHOLDER_ID_MODES)[number];
+export const DEFAULT_ID_MODE: PlaceholderIdMode = 'random';
+/** Plugin store key of the local key for stable ids (64 hex characters); never sent or shown. */
+export const ID_KEY_STORE_KEY = 'placeholder-id-key';
+export const ID_KEY_BYTES = 32;
 export const EMAIL_LABEL = 'EMAIL';
 export const CUSTOM_LABEL = 'CUSTOM';
 

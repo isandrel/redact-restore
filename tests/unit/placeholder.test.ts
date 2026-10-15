@@ -11,6 +11,7 @@ import {
   unmaskText,
 } from '../../hooks/privacy.ts';
 import { parseConfig } from '../../hooks/config.ts';
+import { hmacSha256Hex } from '../../hooks/hmac.ts';
 
 const base = { customValues: ['Project Phoenix'], customCaseInsensitive: false, redactEmails: true };
 
@@ -124,5 +125,48 @@ describe('per-value rules', () => {
     const masked = maskText('acme.internal', matching, {});
     expect(unmaskText('HOST_ALPHA2 HOST_ALPHA', masked.additions)).toBe('HOST_ALPHA2 acme.internal');
     expect(maskText('HOST_ALPHA', matching, masked.additions).text).toBe('HOST_ALPHA');
+  });
+});
+
+describe('stable placeholder ids', () => {
+  const KEY = 'ab'.repeat(32);
+
+  test('HMAC-SHA-256 matches RFC 4231 test case 2', () => {
+    expect(hmacSha256Hex('Jefe', 'what do ya want for nothing?')).toBe(
+      '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843',
+    );
+  });
+
+  test('stable: the same value and label give the same placeholder in a new session', () => {
+    const matching = (key?: string) =>
+      parseConfig({ custom_values: ['Project Phoenix'], placeholder_ids: 'stable' }, () => key).matching;
+    const first = maskText('see Project Phoenix', matching(KEY), {});
+    const second = maskText('Project Phoenix again', matching(KEY), {});
+    expect(Object.keys(first.additions)).toEqual(Object.keys(second.additions));
+    expect(Object.keys(first.additions)[0]).toMatch(/^\{\{PRIVATE:CUSTOM#[a-f0-9]{12}\}\}$/);
+    // Another key, or no key loaded yet, gives a different (random) id.
+    expect(Object.keys(maskText('Project Phoenix', matching('cd'.repeat(32)), {}).additions)).not.toEqual(
+      Object.keys(first.additions),
+    );
+    expect(Object.keys(maskText('Project Phoenix', matching(undefined), {}).additions)).not.toEqual(
+      Object.keys(first.additions),
+    );
+  });
+
+  test('random is the default, and a key is ignored then', () => {
+    const config = parseConfig({ custom_values: ['Project Phoenix'] }, () => KEY);
+    expect(config.placeholderIds).toBe('random');
+    const a = maskText('Project Phoenix', config.matching, {});
+    const b = maskText('Project Phoenix', config.matching, {});
+    expect(Object.keys(a.additions)).not.toEqual(Object.keys(b.additions));
+  });
+
+  test('a stable id already held by another value falls back to random', () => {
+    const { matching } = parseConfig({ custom_values: ['Project Phoenix'], placeholder_ids: 'stable' }, () => KEY);
+    const stable = Object.keys(maskText('Project Phoenix', matching, {}).additions)[0] ?? '';
+    const masked = maskText('Project Phoenix', matching, { [stable]: 'Other Value' });
+    const token = Object.keys(masked.additions)[0] ?? '';
+    expect(token).not.toBe(stable);
+    expect(masked.additions[token]).toBe('Project Phoenix');
   });
 });

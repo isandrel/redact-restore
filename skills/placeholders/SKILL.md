@@ -5,7 +5,7 @@ description: "Explain and customize Redact Restore placeholders: the {{PRIVATE:L
 
 # Placeholders
 
-The default format is `{{PRIVATE:{label}#{id}}}`, for example `{{PRIVATE:EMAIL#3fa1c09e8b2d}}`. Within a session, the same value always gets the same placeholder. Copy placeholders exactly; never guess the original.
+The default format is `{{PRIVATE:{label}#{id}}}`, for example `{{PRIVATE:EMAIL#3fa1c09e8b2d}}`. Within a session, the same value always gets the same placeholder. Across sessions it gets a new one, unless the option `placeholder_ids` is `stable`: then the same value keeps one placeholder in every session (derived from a key on this machine), and the provider can tell two sessions mention the same value without learning it. Copy placeholders exactly; never guess the original.
 
 ## Per-value labels and aliases
 
