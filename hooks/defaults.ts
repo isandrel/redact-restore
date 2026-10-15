@@ -87,6 +87,15 @@ export const EXPORT_FILE = 'redact-restore-rules.json';
 /** Dots in a masked preview (`P•••• (15)`). */
 export const PREVIEW_DOTS = 4;
 
+// Session maps (`persist_session_map`)
+/** Folder under the home folder for one placeholder map per session; created owner-only where the system allows. */
+export const SESSION_MAP_DIR = '.claude/redact-restore/sessions';
+export const SESSION_MAP_FORMAT = 'redact-restore-session';
+export const SESSION_MAP_VERSION = 1;
+/** Maps untouched for longer are deleted when a session starts (`session_map_days`). */
+export const SESSION_MAP_DAYS = 30;
+export const SESSION_MAP_DAYS_CEILING = 3650;
+
 // Display
 /**
  * Rendered rows that can show placeholders, and the props restored for drawing

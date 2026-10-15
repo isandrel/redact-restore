@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `/resume` keeps working: each session's placeholder map is kept in a local file (`persist_session_map`, on by default; folder 700, file 600 where the system allows) and loaded again after a resume, so earlier placeholders still show and restore. Files untouched for `session_map_days` (30) are deleted.
 - `restore_streaming` is on by default: replies show original values while they stream, not only once complete.
 - Descriptions: tell the model what a value is without the value. The placeholder note explains common labels (static, so the prompt cache keeps hitting), and saved values and patterns can carry a description (`client company name`), sent once per placeholder as hidden context with your next prompt. Descriptions are checked and masked locally; scans suggest one from where they found the value; export and import carry them.
 - `placeholder_ids` option: `random` (default) gives a value a new placeholder in each session; `stable` gives the same value the same placeholder in every session, from a local key in the plugin store (HMAC-SHA-256). The docs list where Redact Restore keeps data.

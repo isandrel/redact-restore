@@ -121,6 +121,8 @@ declare module 'claude-code' {
       pane: RedactRestorePane;
       /** Placeholder descriptions (never values), and which the model has been told. */
       legend: { readonly notes: Record<string, string>; readonly sent: Readonly<Record<string, true>> };
+      /** The session whose saved placeholder map was looked for after a resume. */
+      mapChecked: string | null;
     };
   }
 }

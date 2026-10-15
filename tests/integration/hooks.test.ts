@@ -19,7 +19,12 @@ const filesOnly = { options: { ...base, restore_mode: 'files' } };
  * The engine beneath the plugin, recorded. Every hook a test needs is registered
  * here, before the test's first call on `$`, as the kit requires.
  */
-function harness(on: On, messages: unknown[] = [], store: Record<string, unknown> = {}) {
+function harness(
+  on: On,
+  messages: unknown[] = [],
+  store: Record<string, unknown> = {},
+  disk: Record<string, string> = {},
+) {
   const seen = {
     prompt: '',
     context: [] as readonly string[],
@@ -41,6 +46,10 @@ function harness(on: On, messages: unknown[] = [], store: Record<string, unknown
   on('fs.write', ($, e) => {
     seen.files.push({ path: e.path, text: e.text });
     return { value: undefined } as never;
+  });
+  on('fs.read', ($, e) => {
+    const written = seen.files.findLast(file => file.path === e.path)?.text ?? disk[e.path];
+    return (written === undefined ? { deny: 'ENOENT' } : { value: written }) as never;
   });
   on('ui.toast', () => ({ value: undefined }) as never);
   on('ui.log', () => ({ value: undefined }) as never);
@@ -597,7 +606,51 @@ describe('status line', () => {
   test('no file by default', configured, async ($, on) => {
     const seen = harness(on);
     await submit($, SECRET);
-    expect(seen.files).toHaveLength(0);
+    expect(seen.files.filter(file => file.path.includes('/status/'))).toHaveLength(0);
+  });
+});
+
+describe('session maps for /resume', () => {
+  const MAP = '/home/user/.claude/redact-restore/sessions/session-1.json';
+
+  test('the map is kept in a local file as values are masked', configured, async ($, on) => {
+    const seen = harness(on);
+    const token = await placeholderFor($, seen, SECRET);
+    const saved = JSON.parse(seen.files.findLast(file => file.path === MAP)?.text ?? '{}');
+    expect(saved).toMatchObject({ format: 'redact-restore-session', version: 1, vault: { [token]: SECRET } });
+  });
+
+  test('a resumed session restores placeholders from before, on screen and in tools', configured, async ($, on) => {
+    const token = '{{PRIVATE:CUSTOM#0123456789ab}}';
+    const disk = {
+      [MAP]: JSON.stringify({
+        format: 'redact-restore-session',
+        version: 1,
+        vault: { [token]: SECRET },
+        notes: {},
+        sent: {},
+      }),
+    };
+    const seen = harness(on, [], {}, disk);
+    await drawAssistant($, `Hello ${token}`);
+    expect(seen.drawn).toEqual([`Hello ${SECRET}`]);
+    await $.tool.call({ tool: 'Write', tool_use_id: 'w1', file_path: '/tmp/x', content: token });
+    expect(seen.tools[0]?.input.content).toBe(SECRET);
+    // The same value keeps its placeholder after the resume.
+    await submit($, `again ${SECRET}`);
+    expect(seen.prompt).toBe(`again ${token}`);
+  });
+
+  test('a file that is not a session map is ignored', configured, async ($, on) => {
+    const seen = harness(on, [], {}, { [MAP]: '{"vault":{"x":1}}' });
+    await drawAssistant($, 'Hello {{PRIVATE:CUSTOM#0123456789ab}}');
+    expect(seen.drawn).toEqual(['Hello {{PRIVATE:CUSTOM#0123456789ab}}']);
+  });
+
+  test('off: nothing is written', { options: { ...base, persist_session_map: false } }, async ($, on) => {
+    const seen = harness(on);
+    await submit($, SECRET);
+    expect(seen.files.filter(file => file.path.includes('/sessions/'))).toEqual([]);
   });
 });
 

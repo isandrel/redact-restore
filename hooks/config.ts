@@ -13,6 +13,8 @@ import {
   DEFAULT_ID_MODE,
   PLACEHOLDER_ID_MODES,
   type PlaceholderIdMode,
+  SESSION_MAP_DAYS,
+  SESSION_MAP_DAYS_CEILING,
 } from './defaults.ts';
 import {
   createScheme,
@@ -55,6 +57,8 @@ export interface RedactRestoreConfig {
   readonly statusFormat: string;
   /** Write per-session counts for a custom status-line script. */
   readonly statusFile: boolean;
+  /** Keep each session's placeholder map in a local file so `/resume` restores (`persist_session_map`). */
+  readonly sessionMap: { readonly persist: boolean; readonly days: number };
   /** Labels offered in the pane's rule form (`rule_labels`, or the built-in list). */
   readonly ruleLabels: readonly string[];
   /** A path scan's limits: folders it skips (built-ins plus `scan_skip_dirs`) and files it reads at most. */
@@ -159,6 +163,13 @@ export function parseConfig(options: RawOptions, stableKey?: () => string | unde
     statusLine: statusLine(options.status_line),
     statusFormat: typeof options.status_format === 'string' ? options.status_format : '',
     statusFile: flag(options, 'status_file', false),
+    sessionMap: {
+      persist: flag(options, 'persist_session_map', true),
+      days:
+        typeof options.session_map_days === 'number' && options.session_map_days > 0
+          ? Math.min(Math.floor(options.session_map_days), SESSION_MAP_DAYS_CEILING)
+          : SESSION_MAP_DAYS,
+    },
     ruleLabels: ruleLabels(options.rule_labels),
     scan: {
       skipDirs: [...new Set([...SCAN_SKIP_DIRS, ...patterns(options, 'scan_skip_dirs', [])])],

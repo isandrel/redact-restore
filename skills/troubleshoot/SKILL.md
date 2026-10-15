@@ -16,7 +16,7 @@ Start by asking the user to run `/redact-restore status` and share its output. I
 | "saved rules could not be read from the plugin store; prompt not submitted" | The plugin store file is unreadable; prompts are held so saved values cannot slip out                                            | Retry; if it repeats, export is unavailable too: re-add rules, or remove the plugin's store file and import a backup |
 | "images and other attachments cannot be scanned"                            | Media cannot be checked for values                                                                                               | Remove the attachment, or turn on `allow_media`                                                                      |
 | A Write or Edit was refused                                                 | It held a placeholder and the restore policy does not restore for it                                                             | See the `policy` skill                                                                                               |
-| "a private placeholder could not be restored"                               | The placeholder is from another session, or was mistyped                                                                         | Use the exact placeholder from this conversation                                                                     |
+| "a private placeholder could not be restored"                               | The placeholder is from another session, was mistyped, or the session was resumed with `persist_session_map` off                 | Use the exact placeholder from this conversation                                                                     |
 | The user sees placeholders on screen                                        | `restore_display` is off, or `restore_streaming` is off and the reply is still streaming                                         | Turn the option on                                                                                                   |
 | No status line                                                              | `status_line` is `off`, or nothing is masked yet                                                                                 | Set `status_line` to `count` or `detailed`                                                                           |
 | `/redact-restore` is missing, or the pane does not open                     | The mod is not loaded, is disabled, or this surface draws no panes (VS Code panel, `claude -p`, WSL sessions in the desktop app) | Use a terminal session or the desktop app's Code tab; check `/plugin`                                                |
@@ -26,6 +26,7 @@ Start by asking the user to run `/redact-restore status` and share its output. I
 ## Where settings live
 
 - Pane rules: the plugin store, a local JSON file in the Claude Code configuration folder. They are plain text on disk.
+- Session placeholder maps (for `/resume`): `~/.claude/redact-restore/sessions/`, plain text on disk; turn off with `persist_session_map`.
 - Keychain rules: `/plugin` → Installed → redact-restore → Configure options → Exact private values.
 - Other options: same place. Restart the session after changing them.
 

@@ -82,6 +82,18 @@
       "description": "Show original values in locally rendered chat messages, tool rows and questions.",
       "default": true
     },
+    "persist_session_map": {
+      "type": "boolean",
+      "title": "Keep placeholders for /resume",
+      "description": "Keep each session's placeholders and their original values in a local file (~/.claude/redact-restore/sessions, owner-only where the system allows), so a resumed session still shows and restores them. Off: a resumed session cannot restore placeholders from before.",
+      "default": true
+    },
+    "session_map_days": {
+      "type": "number",
+      "title": "Days to keep placeholder files",
+      "description": "Placeholder files of sessions untouched for this many days are deleted when a session starts (default 30).",
+      "default": 30
+    },
     "restore_display_rows": {
       "type": "string",
       "title": "Rows restored on screen",

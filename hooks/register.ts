@@ -10,6 +10,8 @@ import {
   PANE_TITLE,
   SCAN_LOG_AUTHORS,
   DISPLAY_RESTORE_FIELDS,
+  SESSION_MAP_DAYS,
+  SESSION_MAP_DIR,
   LABEL_DESCRIPTIONS,
   LEGEND_MAX_ENTRIES,
   ID_KEY_STORE_KEY,
@@ -75,6 +77,7 @@ import {
   triage,
   type ScanCandidate,
 } from './scan.ts';
+import { isSessionId, parseSessionMap, type SessionMap, serializeSessionMap } from './session-map.ts';
 import { formatStatus, statusFileContent, statusStats } from './status.ts';
 import { combine, emptyMetrics, metricsChange, type Metrics, type MetricsChange } from './metrics.ts';
 import { CUSTOM_LABEL, EMAIL_LABEL, isIdKey, newIdKey } from './placeholder.ts';
@@ -119,6 +122,8 @@ const EMPTY_LEGEND: Legend = { notes: {}, sent: {} };
 
 // Descriptions of this session's placeholders, and which ones the model has been told.
 const legend = atom({ plugin: 'redact-restore', key: 'legend' }, EMPTY_LEGEND);
+// The session whose saved placeholder map was looked for (see loadSessionMap).
+const mapChecked = atom({ plugin: 'redact-restore', key: 'mapChecked' }, null as string | null);
 
 function unrestoredDenied(tool: string): string {
   return (
@@ -145,6 +150,13 @@ async function record(
   const stored =
     Object.keys(additions).length > 0 ? await update($, vault, current => ({ ...current, ...additions })) : undefined;
   if (stored) lastVault = stored;
+  if (stored || Object.keys(notes).length > 0) {
+    try {
+      await saveSessionMap($);
+    } catch {
+      // The map is for /resume only: a failed write must not block masking.
+    }
+  }
   if (!change && !stored) return;
   try {
     const counters = change ? await update($, metrics, current => change(current, Date.now())) : await read($, metrics);
@@ -240,8 +252,133 @@ interface Context {
 let lastVault: Vault = {};
 
 async function vaultNow($: EngineInterface): Promise<Vault> {
-  lastVault = await read($, vault);
-  return lastVault;
+  let current = await read($, vault);
+  if (sessionMapSettings.persist && isEmpty(current)) {
+    try {
+      current = (await loadSessionMap($)) ?? current;
+    } catch {
+      // The saved map only helps after /resume; masking goes on without it.
+    }
+  }
+  lastVault = current;
+  return current;
+}
+
+function isEmpty(record: object): boolean {
+  for (const _ in record) return false;
+  return true;
+}
+
+// Session maps: each session's placeholder map in a local file, so /resume (which
+// starts $.state empty) restores what earlier turns masked. Set from the options.
+let sessionMapSettings: RedactRestoreConfig['sessionMap'] = { persist: false, days: SESSION_MAP_DAYS };
+let mapSaving: Promise<void> | undefined;
+let mapDirty = false;
+const mapPathsReady = new Set<string>();
+
+async function sessionMapDir($: EngineInterface): Promise<string | undefined> {
+  const home = await homeDir($);
+  return home ? `${home.replace(/[\\/]+$/, '')}/${SESSION_MAP_DIR}` : undefined;
+}
+
+async function sessionMapPath($: EngineInterface): Promise<string | undefined> {
+  const dir = await sessionMapDir($);
+  const id = await $.session.id();
+  return dir && isSessionId(id) ? `${dir}/${id}.json` : undefined;
+}
+
+/** Brings back the session's saved map once, after a resume or a restart. */
+async function loadSessionMap($: EngineInterface): Promise<Vault | undefined> {
+  // Kept in $.state, which a resume empties: each resumed session looks once.
+  const id = await $.session.id();
+  if ((await read($, mapChecked)) === id) return undefined;
+  await update($, mapChecked, () => id);
+  const path = await sessionMapPath($);
+  if (!path) return undefined;
+  let saved: SessionMap | undefined;
+  try {
+    saved = parseSessionMap(String(await $.fs.read(path)));
+  } catch {
+    return undefined; // No saved map: a new session.
+  }
+  if (!saved || isEmpty(saved.vault)) return undefined;
+  const { vault: savedVault, notes, sent } = saved;
+  const merged = await update($, vault, current => ({ ...savedVault, ...current }));
+  await update($, legend, current => ({
+    notes: { ...notes, ...current.notes },
+    sent: { ...sent, ...current.sent },
+  }));
+  return merged;
+}
+
+/**
+ * The vault for drawing. A render may not write $.state, so after a resume the
+ * rows drawn before the next event read the saved map without loading it.
+ */
+let drawnMap: { readonly id: string; readonly vault: Vault } | undefined;
+async function displayVault($: EngineInterface): Promise<Vault> {
+  const current = await read($, vault);
+  if (!sessionMapSettings.persist || !isEmpty(current)) return current;
+  try {
+    const id = await $.session.id();
+    if (drawnMap?.id !== id) {
+      const path = await sessionMapPath($);
+      const saved = path ? parseSessionMap(String(await $.fs.read(path))) : undefined;
+      drawnMap = { id, vault: saved?.vault ?? {} };
+    }
+    return drawnMap.vault;
+  } catch {
+    return current;
+  }
+}
+
+/** Writes the session's map; saves that arrive while one runs are folded into one more. */
+async function saveSessionMap($: EngineInterface): Promise<void> {
+  if (!sessionMapSettings.persist) return;
+  if (mapSaving) {
+    mapDirty = true;
+    return mapSaving;
+  }
+  mapSaving = (async () => {
+    do {
+      mapDirty = false;
+      await writeSessionMap($);
+    } while (mapDirty);
+  })().finally(() => {
+    mapSaving = undefined;
+  });
+  return mapSaving;
+}
+
+async function writeSessionMap($: EngineInterface): Promise<void> {
+  const path = await sessionMapPath($);
+  const current = await read($, vault);
+  if (!path || isEmpty(current)) return;
+  const told = await read($, legend);
+  // Owner-only folder and file where the system has chmod; elsewhere the home folder's own access applies.
+  if (!mapPathsReady.has(path)) await runQuietly($, ['mkdir', '-p', '-m', '700', path.slice(0, path.lastIndexOf('/'))]);
+  await $.fs.write(path, serializeSessionMap({ vault: current, notes: told.notes, sent: told.sent }, new Date()));
+  if (!mapPathsReady.has(path)) {
+    await runQuietly($, ['chmod', '600', path]);
+    mapPathsReady.add(path);
+  }
+}
+
+/** Deletes maps of sessions untouched for `session_map_days`. */
+async function pruneSessionMaps($: EngineInterface): Promise<void> {
+  const dir = await sessionMapDir($);
+  if (!dir) return;
+  let entries: readonly { name: string; kind: string; mtimeMs: number }[];
+  try {
+    entries = await $.fs.list(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - sessionMapSettings.days * 86_400_000;
+  const old = entries
+    .filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.mtimeMs < cutoff)
+    .map(entry => `${dir}/${entry.name}`);
+  if (old.length > 0) await runQuietly($, ['rm', '-f', '--', ...old]);
 }
 
 // Text the audit found clean, per matching options: new rules or detectors start a fresh memo.
@@ -829,6 +966,7 @@ export const register: Register = (on, options) => {
   // Never log their originals or insert them into files, prompts, or diagnostics.
   const idKey: { value?: string } = {};
   const config = parseConfig(options, () => idKey.value);
+  sessionMapSettings = config.enabled ? config.sessionMap : { ...config.sessionMap, persist: false };
   const { matching } = config;
   const policy = { allowMedia: config.allowMedia };
   const ctx: Context = { config, optionRules: [...(matching.rules?.values() ?? [])], idKey };
@@ -849,6 +987,7 @@ export const register: Register = (on, options) => {
     }
     if (config.enabled) await record($, config, {}, (m, now) => ({ ...m, updatedAt: now }));
     else $.ui.status(undefined);
+    if (sessionMapSettings.persist) await pruneSessionMaps($).catch(ignore);
     if (config.enabled && config.ignoredShortValues > 0) {
       $.ui.toast(`Redact Restore ignored ${config.ignoredShortValues} custom value(s) shorter than 3 characters.`);
     }
@@ -879,6 +1018,10 @@ export const register: Register = (on, options) => {
       await update($, vault, () => ({}));
       await update($, legend, () => EMPTY_LEGEND);
       lastVault = {};
+      // The cleared conversation's saved map must not come back into the new one.
+      const id = await $.session.id().catch(() => null);
+      await update($, mapChecked, () => id);
+      if (id) drawnMap = { id, vault: {} };
       const previous = await read($, metrics);
       await update($, metrics, () => emptyMetrics(Date.now(), previous.version, previous.surface));
       await record($, config, {}, (m, now) => ({ ...m, lastEvent: 'clear', updatedAt: now }));
@@ -923,6 +1066,7 @@ export const register: Register = (on, options) => {
         ...current,
         sent: { ...current.sent, ...Object.fromEntries(fresh.map(([token]) => [token, true] as const)) },
       }));
+      await saveSessionMap($).catch(ignore);
     }
     return next({ ...e, text, ...(context.length > 0 ? { context } : {}) });
   }).catch(async ($, e, next) => {
@@ -1190,7 +1334,7 @@ export const register: Register = (on, options) => {
     on('ui.render', { component: config.displayRows }, async ($, e, next) => {
       if (!config.enabled) return next(e);
       const fields = DISPLAY_RESTORE_FIELDS[e.component as DisplayRow];
-      const props = restoreFields(e.props, fields, await vaultNow($), config.placeholders);
+      const props = restoreFields(e.props, fields, await displayVault($), config.placeholders);
       return props === e.props ? next(e) : next({ ...e, props } as typeof e);
     });
   }
