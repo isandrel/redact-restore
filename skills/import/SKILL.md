@@ -32,7 +32,7 @@ A rule is skipped when the value is under 3 characters, the label is invalid, or
 
 ## Help the user without seeing values
 
-- The user should write the file themselves, in their own editor. Never offer to create it with values they type into chat: chat text reaches you before the rules exist.
+- The user should write the file themselves, in their own editor. Do not offer to create it from values they type into chat: names and codenames reach you before the rules exist.
 - You may write a template in this format with synthetic examples, such as `{ "value": "Acme Corp", "label": "CUSTOMER" }`, for the user to fill in.
 - Imported rules take effect at once in this session. If those values are already in the conversation, the next request is blocked: run `/clear`.
 - Ask the user to delete the import file afterwards if it held real values.

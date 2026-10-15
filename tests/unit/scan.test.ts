@@ -153,6 +153,17 @@ describe('KEY=value values in any text', () => {
     ]);
   });
 
+  test('inline assignments in a one-line paste or a command, with no spaces around =', () => {
+    const text =
+      'config: GITHUB_REPO=acme/widget SERVICE_USER=svc-team42 "QUOTED=a b c" then run DB_HOST=db.acme.internal ./start.sh; ' +
+      'code: x = 1, LIMIT = 50, path=$HOME/x, url?a=Bc123';
+    expect(envAssignments(text).map(({ key, value }) => [key, value])).toEqual([
+      ['GITHUB_REPO', 'acme/widget'],
+      ['SERVICE_USER', 'svc-team42'],
+      ['DB_HOST', 'db.acme.internal'],
+    ]);
+  });
+
   test('the env detector masks them by default and can be turned off', () => {
     const text = 'cat .env\nTEAM_CODENAME=bluefalcon-internal\nDEBUG=true';
     expect(findPrivateMatches(text, parseConfig({}).matching).map(m => [m.category, m.value])).toEqual([

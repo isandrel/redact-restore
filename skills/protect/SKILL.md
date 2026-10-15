@@ -9,7 +9,8 @@ Redact Restore replaces private values with placeholders such as `{{PRIVATE:NAME
 
 You only ever see placeholders. Deciding what is private happens on the user's machine, never in this conversation:
 
-- Never ask the user to type, paste or confirm a private value in chat: chat text reaches you before a rule for it exists.
+- The user may paste text with private values into chat as usual. Values that a rule or a detector covers (emails, API keys and tokens, passwords, private keys, JWTs, `KEY=value` settings, cards, phone and ID numbers, IP addresses) are masked before you see them and restored on their screen. Names, company names and codenames are masked only once they are rules, so suggest adding those first.
+- Do not ask the user to paste a value just so you can judge whether it is private.
 - Never read files or run commands to find or judge private values; ask the user to run the local scan instead (see the `scan` skill).
 - You cannot run slash commands; ask the user to run them, and never say one is running.
 

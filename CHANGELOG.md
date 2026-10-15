@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Paste as usual: text with tokens and secrets pasted into chat is masked before it reaches the model and restored on screen. The `KEY=value` detector also covers inline assignments (`FOO=bar`, a one-line paste), and secret assignments match keys with a suffix (`aws_access_key_id =`, `client_secret_value:`). Skills and docs no longer tell users to avoid pasting values.
 - Sensitive values are found and judged on your machine only. `/redact-restore scan PATH` checks any folder or file for `KEY=value` values and private host names, and counts what detectors already mask; the model receives counts and labels only. Skipped folders and the file limit are options (`scan_skip_dirs`, `scan_max_files`).
 - New default-on detector `env_assignment`: the value of a `KEY=value` line (as in `.env` files) is masked in everything sent to the model, so a settings file read by a tool no longer leaks names or hosts it holds.
 - Skills no longer let the model read files, run commands or ask for pasted values to judge what is private, and no longer claim a scan is running; they ask the user to run the local scan.

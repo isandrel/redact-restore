@@ -65,6 +65,8 @@ const HIDE: Array<[string, string, string]> = [
   ['CN_PHONE', '+86 13912345678', '+86 13912345678'],
   ['CN_USCC', `代码 ${uscc('91350100M000100Y4')}`, uscc('91350100M000100Y4')],
   ['IP', 'host 10.20.30.40 is down', '10.20.30.40'],
+  ['SECRET', `aws_access_key_id = ${join('Zq', 'Pw7Lm2Xk9Rt4')}`, join('Zq', 'Pw7Lm2Xk9Rt4')],
+  ['SECRET', `client_secret_value: ${join('Hb', '3Kd8Wn5Qy2Vs')}`, join('Hb', '3Kd8Wn5Qy2Vs')],
   ['US_SSN', 'SSN 078-05-1120', '078-05-1120'],
   ['PHONE', 'call +1 415 555 0100', '+1 415 555 0100'],
 ];

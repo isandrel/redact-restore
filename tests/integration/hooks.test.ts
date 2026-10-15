@@ -173,9 +173,10 @@ describe('conversation rows', () => {
   // the test reads the row its bottom hook receives and tolerates the missing store.
   test('session.append masks tool results and withholds media', configured, async ($, on) => {
     let stored: unknown;
-    on('session.append', ($, e) => {
+    // Recent engines require a session.append hook to pass the row on with next(e).
+    on('session.append', ($, e, next) => {
       stored = e.message.content;
-      return { message: e.message, uuid: e.uuid };
+      return next(e);
     });
     await $.session
       .append({

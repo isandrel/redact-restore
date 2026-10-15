@@ -156,13 +156,15 @@ claude plugin marketplace add isandrel/redact-restore
 claude plugin install redact-restore@redact-restore
 ```
 
-**2. Tell it what is private**, without typing values in chat:
+**2. Use Claude as usual.** Paste logs, configs or snippets with tokens and secrets: emails, API keys, passwords, private keys, `KEY=value` settings, card, phone and ID numbers are masked before they leave and restored on your screen.
+
+**3. Add what detectors cannot know**, such as names, customers and codenames:
 
 - `/redact-restore scan` finds your git identity, coworkers, remotes, machine and account names, and `.env` values; `/redact-restore scan PATH` checks any folder or file. It runs on your machine, so nothing is sent to the model to judge. Pick **Add** or **Ignore** in the pane.
 - `/redact-restore rules` adds your own in a form: the private value (`Acme Corp`), then a label (`CUSTOMER`) or a fixed alias (`CLIENT_A`), with a preview of what the model sees.
 - For your most sensitive values, use the keychain instead: `/plugin` → **Installed** → **redact-restore** → **Configure options** → **Exact private values**.
 
-**3. Start clean and check.** Run `/clear`, then `/redact-restore session` or look at the status line under the prompt. Ask Claude to spell a protected value character by character: it can only spell the placeholder.
+**4. Start clean and check.** Run `/clear`, then `/redact-restore session` or look at the status line under the prompt. Ask Claude to spell a protected value character by character: it can only spell the placeholder.
 
 Update later with `claude plugin update redact-restore@redact-restore`. The plugin also ships skills you can ask for by name: `/redact-restore:protect`, `:scan`, `:status`, `:policy`, `:placeholders`, `:troubleshoot`, `:import` and `:export`.
 

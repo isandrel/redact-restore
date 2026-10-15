@@ -58,8 +58,11 @@ function spans(
   return found;
 }
 
-// `KEY=value` lines with an upper-case key, as in .env files, shell exports and Dockerfiles.
+// `KEY=value` with an upper-case key: a whole line (as in .env files, where
+// spaces around `=` and a value running to the end of the line are allowed),
+// or inline with no spaces around `=` (`FOO=bar cmd`, a one-line paste).
 const ENV_LINE = /^[ \t]*(?:export[ \t]+)?([A-Z][A-Z0-9_]{1,63})[ \t]*=[ \t]*([^\r\n]*)$/gm;
+const ENV_INLINE = /(?<![\w.$-])([A-Z][A-Z0-9_]{1,63})=("[^"\r\n]*"|'[^'\r\n]*'|[^\s"'`;,|&)]+)/g;
 
 /** A value worth hiding: not empty, trivial (`true`, `8080`), a reference (`${HOME}`) or a placeholder. */
 function envValueWorthMasking(value: string): boolean {
@@ -72,6 +75,18 @@ function envValueWorthMasking(value: string): boolean {
   );
 }
 
+/** The value's span inside a raw `=` right-hand side: quotes and a trailing comment removed. */
+function valueSpan(text: string, rawStart: number, raw: string, comments: boolean): { start: number; end: number } {
+  const quote = raw.charAt(0);
+  const close = quote === '"' || quote === "'" ? raw.indexOf(quote, 1) : -1;
+  if (close > 0) return { start: rawStart + 1, end: rawStart + close };
+  let end = rawStart + raw.length;
+  const comment = comments ? raw.search(/\s#/) : -1;
+  if (comment >= 0) end = rawStart + comment;
+  while (end > rawStart && /\s/.test(text.charAt(end - 1))) end -= 1;
+  return { start: rawStart, end };
+}
+
 /**
  * Every `KEY=value` assignment's value, quotes and trailing comments removed:
  * the env detector masks them, and a path scan lists them.
@@ -79,26 +94,24 @@ function envValueWorthMasking(value: string): boolean {
 export function envAssignments(text: string): Array<{ key: string; value: string; start: number; end: number }> {
   if (!text.includes('=')) return [];
   const found: Array<{ key: string; value: string; start: number; end: number }> = [];
+  const taken: Array<{ start: number; end: number }> = [];
+  const add = (key: string, span: { start: number; end: number }) => {
+    const value = text.slice(span.start, span.end);
+    if (!envValueWorthMasking(value) || taken.some(t => span.start < t.end && t.start < span.end)) return;
+    taken.push(span);
+    found.push({ key, value, ...span });
+  };
   ENV_LINE.lastIndex = 0;
   for (let match = ENV_LINE.exec(text); match; match = ENV_LINE.exec(text)) {
     const raw = match[2] ?? '';
-    const rawStart = match.index + match[0].length - raw.length;
-    let start = rawStart;
-    let end = rawStart + raw.length;
-    const quote = raw.charAt(0);
-    const close = quote === '"' || quote === "'" ? raw.indexOf(quote, 1) : -1;
-    if (close > 0) {
-      start = rawStart + 1;
-      end = rawStart + close;
-    } else {
-      const comment = raw.search(/\s#/);
-      if (comment >= 0) end = rawStart + comment;
-      while (end > start && /\s/.test(text.charAt(end - 1))) end -= 1;
-    }
-    const value = text.slice(start, end);
-    if (envValueWorthMasking(value)) found.push({ key: match[1] ?? '', value, start, end });
+    add(match[1] ?? '', valueSpan(text, match.index + match[0].length - raw.length, raw, true));
   }
-  return found;
+  ENV_INLINE.lastIndex = 0;
+  for (let match = ENV_INLINE.exec(text); match; match = ENV_INLINE.exec(text)) {
+    const raw = match[2] ?? '';
+    add(match[1] ?? '', valueSpan(text, match.index + match[0].length - raw.length, raw, false));
+  }
+  return found.sort((a, b) => a.start - b.start);
 }
 
 /** A detector from a regex, with an optional literal hint that must appear first. */
@@ -447,7 +460,7 @@ export const DETECTORS: readonly Detector[] = [
       'SECRET',
       ['secrets', 'cn'],
       true,
-      /(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|client[_-]?secret|private[_-]?key|密码|口令|令牌|密钥)["']?\s*[:=：＝]\s*["'“]?(?<secret>[^\s"'”,;]{8,})/gi,
+      /(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|client[_-]?secret|private[_-]?key|密码|口令|令牌|密钥)(?:[_-][A-Za-z0-9]{1,16}){0,2}["']?\s*[:=：＝]\s*["'“]?(?<secret>[^\s"'”,;]{8,})/gi,
       undefined,
       value => credentialValue(value, 3),
     ),
