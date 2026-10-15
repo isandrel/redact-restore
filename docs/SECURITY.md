@@ -1,6 +1,6 @@
 # Security review, threat model and limitations
 
-**Status (2026-10-11):** experimental. Core paths, subagents, compaction, `/resume`, `/clear` and concurrent sessions are live-tested with synthetic data in a clean interactive Claude Code CLI 2.1.287; type-checked against 2.1.295. Redact Restore is **not** a DLP product. Do not rely on it for real secrets until the release gates at the end of this file are met.
+**Status (2026-10-14, 0.2.0):** experimental. Core paths, subagents, compaction, `/resume`, `/clear` and concurrent sessions are live-tested with synthetic data in a clean interactive Claude Code CLI (2.1.287; display restore of tool rows, descriptions, session maps for `/resume` and prompt-cache hits on 2.1.292); type-checked against 2.1.295. Desktop Code is live-tested for the status line only. Redact Restore is **not** a DLP product. Do not rely on it for real secrets until the release gates at the end of this file are met.
 
 ## Goal and trust boundary
 

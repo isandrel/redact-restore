@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-14
+
+Verified: 294 unit and integration tests (`claude-code/testing`, CLI 2.1.292), `bun run bench`, and a live CLI 2.1.292 session with synthetic data (display restore of Bash rows, descriptions before and after `/compact`, `/resume` in a new process, prompt-cache hits; the model received 0 raw values). Desktop Code: not live-tested for these changes.
 
 - Faster in large sessions: 1 MB of tool output masks in about 60 ms instead of 160 ms (gitleaks keywords found in one pass, a quadratic overlap check in the `KEY=value` detector removed), and a vault of 10,000 values no longer recompiles for every new value (masking 300 rows went from 23 s to 0.2 s). `bun run bench` measures it.
 - `/resume` keeps working: each session's placeholder map is kept in a local file (`persist_session_map`, on by default; folder 700, file 600 where the system allows) and loaded again after a resume, so earlier placeholders still show and restore. Files untouched for `session_map_days` (30) are deleted.

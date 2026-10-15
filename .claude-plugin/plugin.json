@@ -1,6 +1,6 @@
 {
   "name": "redact-restore",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reversible redaction for Claude Code: private values are replaced with placeholders before the model API sees them and restored locally. No API gateway.",
   "displayName": "redact-restore",
   "author": {
