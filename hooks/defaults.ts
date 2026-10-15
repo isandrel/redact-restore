@@ -9,20 +9,18 @@
 // Matching
 /** Shorter literals would shred ordinary text (single letters, common pairs). */
 export const MIN_CUSTOM_VALUE_LENGTH = 3;
-/** Compiled literal alternations kept; hooks call the matcher per block. */
-export const LITERAL_CACHE_LIMIT = 16;
+/** Text blocks the outbound audit remembers as clean (a very long session); past this it starts over. */
+export const AUDIT_MEMO_LIMIT = 50_000;
 /** Nesting depth walked when restoring tool input. */
 export const MAX_INPUT_DEPTH = 32;
 
-/** Pattern rules: checked when saved, bounded when run (JavaScript has no regex timeout). */
+/** Pattern rules: a safe subset, checked deterministically (JavaScript has no regex timeout). */
 export const PATTERN_LIMITS = {
   maxLength: 512,
-  /** A probe run over adversarial input may take at most this long. */
-  budgetMs: 50,
-  /** Probe input sizes, growing so an exponential pattern fails early instead of hanging. */
-  probeLengths: [4, 8, 12, 16, 20, 24, 28, 100, 400, 2000] as readonly number[],
-  /** Matches one pattern may report per text. */
-  maxMatches: 1000,
+  /** Open-ended repeats (`*`, `+`, `{n,}`) a pattern may use. */
+  maxFreeRepeats: 2,
+  /** The fixed text every match must contain; the regex runs only in windows around it. */
+  minKeyword: 3,
 } as const;
 
 // Placeholders
@@ -83,11 +81,13 @@ export const PREVIEW_DOTS = 4;
 export const SCAN_TIMEOUT_MS = 5000;
 export const SCAN_LOG_AUTHORS = 200;
 export const SCAN_MAX_FILE_BYTES = 262_144;
-/** A path scan reads at most this many text files, this many folders deep. */
+/** A path scan looks at most at this many files (read or skipped), this many folders deep. */
 export const SCAN_MAX_FILES = 2000;
 /** The most `scan_max_files` may ask for. */
 export const SCAN_FILES_CEILING = 20_000;
 export const SCAN_MAX_DEPTH = 8;
+/** Folders a path scan opens at most, so a huge tree of empty or skipped folders still ends. */
+export const SCAN_MAX_DIRS = 5000;
 /** Folders a path scan skips: dependencies, build output, version control. */
 export const SCAN_SKIP_DIRS: readonly string[] = [
   '.git',

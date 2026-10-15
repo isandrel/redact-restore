@@ -1,7 +1,7 @@
 /** Pure matching code: never logs, stores, or transmits matched values. */
 import { DEFAULT_SCHEME, isUsableAlias, type PlaceholderScheme, type ValueRule } from './placeholder.ts';
 import { selectDetectors, type Detector } from './detectors.ts';
-import { LITERAL_CACHE_LIMIT, MIN_CUSTOM_VALUE_LENGTH } from './defaults.ts';
+import { MIN_CUSTOM_VALUE_LENGTH } from './defaults.ts';
 
 /** A placeholder label: `CUSTOM`, `EMAIL`, a detector's label, or a user's label. */
 export type PrivacyCategory = string;
@@ -118,26 +118,13 @@ export function normalizeRules(input: readonly ValueRule[]): NormalizedValues {
     if (kept.alias) aliases.add(kept.alias);
     rules.set(key, kept);
   }
-  return { values, rules, tooShort, invalid };
-}
-
-// One alternation per literal set, longest first, so the leftmost match is also
-// the longest literal starting there. Cached because hooks call this per block.
-const literalCache = new Map<string, RegExp>();
-
-function literalPattern(values: readonly string[], caseInsensitive: boolean): RegExp | undefined {
-  if (values.length === 0) return undefined;
-  const sorted = [...new Set(values)].sort((a, b) => b.length - a.length);
-  const flags = caseInsensitive ? 'giu' : 'gu';
-  const key = `${flags}\u0000${sorted.join('\u0000')}`;
-  let pattern = literalCache.get(key);
-  if (!pattern) {
-    pattern = new RegExp(sorted.map(escapeRegExp).join('|'), flags);
-    if (literalCache.size >= LITERAL_CACHE_LIMIT) literalCache.clear();
-    literalCache.set(key, pattern);
+  // Any spelling that ignores case makes every spelling of that value ignore case (the safe side).
+  for (const rule of usable) {
+    const key = rule.value.toLowerCase();
+    const kept = rules.get(key);
+    if (rule.ignoreCase && kept && !kept.ignoreCase) rules.set(key, { ...kept, ignoreCase: true });
   }
-  pattern.lastIndex = 0;
-  return pattern;
+  return { values, rules, tooShort, invalid };
 }
 
 /**
@@ -182,12 +169,76 @@ export function findEmails(text: string): Array<{ start: number; end: number }> 
 }
 
 /** Ranges of existing placeholders and known tokens (aliases too), never masked again. */
-function protectedRanges(text: string, scheme: PlaceholderScheme, tokens: readonly string[]) {
+/**
+ * Compiled matchers for the session's known values and tokens. The vault only
+ * grows within a session (a /clear starts a new one), so its size and its first
+ * and last entries identify a version: a large vault is compiled once per
+ * change, not once per message.
+ */
+interface KnownIndex {
+  readonly values?: RegExp;
+  readonly category: ReadonlyMap<string, PrivacyCategory>;
+  readonly tokens?: RegExp;
+}
+// A few versions at once: the audit alternates between the whole vault and the part added since.
+const knownIndexCache = new Map<string, KnownIndex>();
+const KNOWN_INDEX_SLOTS = 4;
+
+function knownIndex(known: readonly KnownValue[], tokens: readonly string[]): KnownIndex {
+  const key = [
+    known.length,
+    tokens.length,
+    known[0]?.value,
+    known[known.length - 1]?.value,
+    tokens[0],
+    tokens[tokens.length - 1],
+  ].join('\u0000');
+  const cached = knownIndexCache.get(key);
+  if (cached) return cached;
+  const category = new Map(known.map(entry => [entry.value, entry.category]));
+  const index: KnownIndex = {
+    category,
+    ...(category.size ? { values: compileLiterals([...category.keys()], false) } : {}),
+    ...(tokens.length ? { tokens: compileLiterals(tokens, false) } : {}),
+  };
+  if (knownIndexCache.size >= KNOWN_INDEX_SLOTS) {
+    const oldest = knownIndexCache.keys().next().value;
+    if (oldest !== undefined) knownIndexCache.delete(oldest);
+  }
+  knownIndexCache.set(key, index);
+  return index;
+}
+
+/** The custom values split by case handling, compiled once per options object. */
+const customCache = new WeakMap<MatchingOptions, { exact?: RegExp; ignoreCase?: RegExp }>();
+
+function customPatterns(options: MatchingOptions): { exact?: RegExp; ignoreCase?: RegExp } {
+  let cached = customCache.get(options);
+  if (!cached) {
+    const insensitive = (value: string) =>
+      options.rules?.get(value.toLowerCase())?.ignoreCase ?? options.customCaseInsensitive;
+    const exact = options.customValues.filter(value => !insensitive(value));
+    const ignoreCase = options.customValues.filter(insensitive);
+    cached = {
+      ...(exact.length ? { exact: compileLiterals(exact, false) } : {}),
+      ...(ignoreCase.length ? { ignoreCase: compileLiterals(ignoreCase, true) } : {}),
+    };
+    customCache.set(options, cached);
+  }
+  return cached;
+}
+
+/** One alternation of literals, longest first, so the leftmost match is also the longest. */
+function compileLiterals(values: readonly string[], caseInsensitive: boolean): RegExp {
+  const sorted = [...new Set(values)].sort((a, b) => b.length - a.length);
+  return new RegExp(sorted.map(escapeRegExp).join('|'), caseInsensitive ? 'giu' : 'gu');
+}
+
+function protectedRanges(text: string, scheme: PlaceholderScheme, literal: RegExp | undefined) {
   const ranges = [...text.matchAll(scheme.pattern)].map(match => ({
     start: match.index,
     end: match.index + match[0].length,
   }));
-  const literal = literalPattern(tokens, false);
   if (literal) {
     for (const match of text.matchAll(literal)) {
       ranges.push({ start: match.index, end: match.index + match[0].length });
@@ -204,18 +255,16 @@ export function findPrivateMatches(
 ): PrivateMatch[] {
   if (text.length === 0) return [];
   const candidates: PrivateMatch[] = [];
-  const guarded = protectedRanges(text, options.placeholders ?? DEFAULT_SCHEME, knownTokens);
+  const index = knownIndex(known, knownTokens);
+  if (index.tokens) index.tokens.lastIndex = 0;
+  const guarded = protectedRanges(text, options.placeholders ?? DEFAULT_SCHEME, index.tokens);
 
   // Literal values are treated as literals, not as regexes. A rule's own
   // ignoreCase wins over the option, so the values form two alternations.
-  const insensitive = (value: string) =>
-    options.rules?.get(value.toLowerCase())?.ignoreCase ?? options.customCaseInsensitive;
-  for (const [values, ignoreCase] of [
-    [options.customValues.filter(value => !insensitive(value)), false],
-    [options.customValues.filter(insensitive), true],
-  ] as const) {
-    const custom = literalPattern(values, ignoreCase);
+  const { exact, ignoreCase } = customPatterns(options);
+  for (const custom of [exact, ignoreCase]) {
     if (!custom) continue;
+    custom.lastIndex = 0;
     for (const match of text.matchAll(custom)) {
       candidates.push({
         start: match.index,
@@ -228,9 +277,10 @@ export function findPrivateMatches(
   }
   // Values already in the vault stay masked even after a config change or when a
   // detector would not find them again (e.g. an Edit result echoing restored text).
-  const knownCategory = new Map(known.map(entry => [entry.value, entry.category]));
-  const knownPattern = literalPattern([...knownCategory.keys()], false);
+  const knownCategory = index.category;
+  const knownPattern = index.values;
   if (knownPattern) {
+    knownPattern.lastIndex = 0;
     for (const match of text.matchAll(knownPattern)) {
       candidates.push({
         start: match.index,

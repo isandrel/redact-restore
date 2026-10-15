@@ -1,5 +1,11 @@
-import { MAX_INPUT_DEPTH, MESSAGES } from './defaults.ts';
-import { findPrivateMatches, type KnownValue, type MatchingOptions, type PrivacyCategory } from './matcher.ts';
+import { AUDIT_MEMO_LIMIT, MAX_INPUT_DEPTH, MESSAGES } from './defaults.ts';
+import {
+  findPrivateMatches,
+  type KnownValue,
+  type MatchingOptions,
+  type PrivacyCategory,
+  type PrivateMatch,
+} from './matcher.ts';
 import { CUSTOM_LABEL, DEFAULT_SCHEME, type PlaceholderScheme } from './placeholder.ts';
 
 /** Side-effect-free matching and token restoration helpers.
@@ -332,15 +338,73 @@ const SYSTEM_REMINDER = /^\s*<system-reminder>/;
  * back discloses nothing it has not already seen. Returns no values, only where
  * and which kind of detector fired.
  */
+/**
+ * What an audit remembers between requests: text it found clean, and how many
+ * vault entries existed then. A long conversation is resent whole on every
+ * request; with the memo only new text gets the full scan, and old text is
+ * checked only for values the vault learned since. Keep one memo per matching
+ * options object: new rules or detectors need a full scan.
+ */
+export interface AuditMemo {
+  readonly clean: Map<string, number>;
+}
+
+export function createAuditMemo(): AuditMemo {
+  return { clean: new Map() };
+}
+
+/** A 53-bit hash with the length: a key for text already audited (cyrb53). */
+function textKey(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${text.length}:${(2097151 & h2) * 4294967296 + (h1 >>> 0)}`;
+}
+
+/** Options that match only known values: for re-checking clean text against values learned since. */
+function knownOnly(options: MatchingOptions): MatchingOptions {
+  return {
+    customValues: [],
+    customCaseInsensitive: false,
+    redactEmails: false,
+    detectors: [],
+    ...(options.placeholders ? { placeholders: options.placeholders } : {}),
+  };
+}
+
 export function auditMessages(
   messages: ReadonlyArray<{ readonly role: string; readonly content: readonly ContentBlock[] }>,
   options: MatchingOptions,
   vault: Vault,
   policy: BlockPolicy,
+  memo?: AuditMemo,
 ): AuditFinding[] {
   const known = knownValues(vault, options.placeholders);
   const tokens = Object.keys(vault);
   const findings: AuditFinding[] = [];
+  const recheck = knownOnly(options);
+  // The first match in a part, scanning only what the memo has not seen yet.
+  const firstMatch = (part: string): PrivateMatch | undefined => {
+    if (!memo) return findPrivateMatches(part, options, known, tokens)[0];
+    const key = textKey(part);
+    const seenAt = memo.clean.get(key);
+    if (seenAt === tokens.length) return undefined;
+    const match =
+      seenAt === undefined
+        ? findPrivateMatches(part, options, known, tokens)[0]
+        : findPrivateMatches(part, recheck, known.slice(seenAt), tokens)[0];
+    if (!match) {
+      if (memo.clean.size >= AUDIT_MEMO_LIMIT) memo.clean.clear();
+      memo.clean.set(key, tokens.length);
+    }
+    return match;
+  };
   messages.forEach((message, messageIndex) => {
     if (message.role !== 'user') return;
     for (const block of message.content) {
@@ -350,7 +414,7 @@ export function auditMessages(
           if (!policy.allowMedia) findings.push({ messageIndex, blockType: block.type, reason: 'MEDIA' });
           continue;
         }
-        const first = findPrivateMatches(part, options, known, tokens)[0];
+        const first = firstMatch(part);
         if (first) findings.push({ messageIndex, blockType: block.type, reason: first.category });
       }
     }

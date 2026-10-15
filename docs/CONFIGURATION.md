@@ -26,7 +26,7 @@ All options are set in a terminal Claude Code session: `/plugin` → **Installed
 | `allow_media`             | `false`                    | Send images/PDFs Redact Restore cannot scan                                                                                                                                                                                                                                                                                                                  |
 | `outbound_audit`          | `true`                     | Refuse a model request that still holds an unmasked value                                                                                                                                                                                                                                                                                                    |
 | `scan_skip_dirs`          | empty                      | Folder names `/redact-restore scan PATH` skips, added to the built-in list (`.git`, `node_modules`, `.venv`, `venv`, `__pycache__`, `dist`, `build`, `target`, `vendor`, `.next`, `coverage`, `.cache`)                                                                                                                                                      |
-| `scan_max_files`          | `2000`                     | Text files a path scan reads at most (up to 20000); files over 256 KiB and binary files are skipped                                                                                                                                                                                                                                                          |
+| `scan_max_files`          | `2000`                     | Files a path scan looks at, read or skipped (up to 20000), up to 8 folders deep and 5000 folders in all; files over 256 KiB and binary files are skipped, and the reply says how many were skipped and whether a limit stopped the scan                                                                                                                      |
 | `rule_labels`             | empty                      | Comma-separated labels offered in the rules pane's Label list (`CUSTOMER, VENDOR, TEAM`). Empty: the built-in list. Labels your rules already use are always added; **Other label…** takes any label                                                                                                                                                         |
 
 ## Placeholders
@@ -56,14 +56,18 @@ Pick **Pattern** as the rule type in `/redact-restore rules` to mask every match
 | Whole word            | On by default: no letter or digit may touch either end of the match                       |
 | Mask                  | The whole match, or one capture group (`ticket=(\w+)` with group 1 masks only the ticket) |
 
-Pattern rules rank with exact values, above the built-in detectors. JavaScript has no regex timeout, so a pattern is checked before it is saved and refused with the reason when it:
+Pattern rules rank with exact values, above the built-in detectors. JavaScript cannot time out a regex, so patterns use a safe subset, checked without running anything, and a pattern outside it is refused with the reason:
 
-- does not compile, is longer than 512 characters, or names a capture group it does not have;
-- uses a backreference (`\1`, `\k<name>`);
-- repeats a group whose body repeats (`(a+)+`, `(\w*)*`, `(.*a){12}`) or holds alternatives (`(a|aa)+`; use a class such as `[ab]+`);
-- matches empty text;
-- runs past 50 ms on adversarial input (long runs of `a`, `0`, spaces and similar, followed by a mismatch), checked at growing sizes so a slow pattern fails early;
-- does not match its example, or masks fewer than 3 characters of it.
+- it must compile with the `u` flag, be at most 512 characters, and have the capture group it names;
+- no backreferences (`\1`, `\k<name>`) and no lookarounds (`(?=…)`, `(?<!…)`); use **Whole word** for boundaries;
+- repeat single characters or classes only, never a group: write `[a-z0-9.-]+`, not `([a-z0-9-]+\.)+`;
+- at most 2 open-ended repeats (`*`, `+`, `{n,}`); give the others a size such as `{1,40}`;
+- a keyword: fixed text of at least 3 characters that every match contains (`ACME-`), outside groups and `|` alternatives;
+- it must match its example and mask at least 3 characters of it.
+
+At run time a pattern runs only in a window around each copy of its keyword (256 characters before, 1024 after), so its cost is bounded per keyword copy rather than by the length of the text. A match that reaches the end of a window is matched again from its start without a limit, and one that reaches the start of a window is widened to the whole run of non-space characters, so a long value is masked whole rather than cut.
+
+If two saved spellings of the same exact value disagree on case, the value ignores case (the safe side).
 
 Exact values can ignore case on their own too: the form's **Ignore case** follows `custom_case_insensitive` by default, or says yes or no for that value.
 
@@ -86,7 +90,7 @@ The plugin store is a JSON file of the plugin's own in your Claude Code configur
 | `/redact-restore session`                   | Opens the pane's **Session** tab: this session's state, counts by kind, source and tool, audits, settings, and every placeholder made (values masked until **Show values**)                                                                                                                                                                                                                                                                                                                                                                           |
 | `/redact-restore status`                    | Rule counts, detectors, this session's counts and settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `/redact-restore export [file]`             | Writes the saved rules to `~/.claude/redact-restore/redact-restore-rules.json` or the given file. Plain text: keep it out of version control and delete it after importing                                                                                                                                                                                                                                                                                                                                                                            |
-| `/redact-restore import <file> [--replace]` | Merges an export file (JSON: `rules` with `value`, `label`, `alias`, `ignoreCase`, and `patterns` with `pattern`, `label`, `ignoreCase`, `wholeWord`, `group`; nothing is parsed from text) into the saved rules and patterns; `--replace` replaces the saved rules, and is refused unless every entry is valid                                                                                                                                                                                                                                       |
+| `/redact-restore import <file> [--replace]` | Merges an export file (JSON: `rules` with `value`, `label`, `alias`, `ignoreCase`, and `patterns` with `pattern`, `label`, `ignoreCase`, `wholeWord`, `group`; nothing is parsed from text) into the saved rules and patterns; `--replace` replaces the saved rules, and the saved patterns too when the file has a `patterns` list (an older export without one keeps them); it is refused unless every entry is valid                                                                                                                               |
 
 The command's output reaches the model, so it holds counts, labels and paths only. A value already in the conversation was sent before its rule existed: the pre-send audit then blocks the next request until you `/clear` or `/rewind`. A removed rule keeps masking in the current session (the session remembers what it has masked) until `/clear`.
 

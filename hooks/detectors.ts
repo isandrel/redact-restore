@@ -71,6 +71,9 @@ function envValueWorthMasking(value: string): boolean {
   return (
     value.length >= MIN_CUSTOM_VALUE_LENGTH &&
     !TRIVIAL_VALUE.test(value) &&
+    // Code, not configuration: a call (`getLogger(__name__)`) or a comparison (`MODE==X`).
+    !/[()]/.test(value) &&
+    !value.startsWith('=') &&
     !/^\$\{?[A-Za-z_]/.test(value) &&
     !value.includes('{{') &&
     !/^<[^>]*>$/.test(value)
@@ -86,6 +89,9 @@ function valueSpan(text: string, rawStart: number, raw: string, comments: boolea
   const comment = comments ? raw.search(/\s#/) : -1;
   if (comment >= 0) end = rawStart + comment;
   while (end > rawStart && /\s/.test(text.charAt(end - 1))) end -= 1;
+  // An unquoted value stops at whitespace: `NODE_ENV=production bun run build` masks one word.
+  const space = text.slice(rawStart, end).search(/\s/);
+  if (space >= 0) end = rawStart + space;
   return { start: rawStart, end };
 }
 
@@ -114,6 +120,30 @@ export function envAssignments(text: string): Array<{ key: string; value: string
     add(match[1] ?? '', valueSpan(text, match.index + match[0].length - raw.length, raw, false));
   }
   return found.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Host names on private networks, told apart from code such as `self.local` or
+ * `threading.local()`: three or more labels, a digit or hyphen in the first label,
+ * or a host context (`//host`, `@host`, `host:port`); never a call.
+ */
+export function findInternalHosts(text: string): Span[] {
+  const spans: Span[] = [];
+  INTERNAL_HOST.lastIndex = 0;
+  for (const match of text.matchAll(INTERNAL_HOST)) {
+    const value = match[0];
+    const start = match.index;
+    const end = start + value.length;
+    if (GENERIC_INTERNAL_HOST.test(value) || text.charAt(end) === '(') continue;
+    const labels = value.split('.');
+    const hostLike =
+      labels.length >= 3 ||
+      /[\d-]/.test(labels[0] ?? '') ||
+      /(?:\/\/|@)$/.test(text.slice(Math.max(0, start - 2), start)) ||
+      /^:\d/.test(text.slice(end, end + 2));
+    if (hostLike) spans.push({ start, end });
+  }
+  return spans;
 }
 
 /** A detector from a regex, with an optional literal hint that must appear first. */
@@ -462,7 +492,7 @@ export const DETECTORS: readonly Detector[] = [
       'SECRET',
       ['secrets', 'cn'],
       true,
-      /(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|client[_-]?secret|private[_-]?key|密码|口令|令牌|密钥)(?:[_-][A-Za-z0-9]{1,16}){0,2}["']?\s*[:=：＝]\s*["'“]?(?<secret>[^\s"'”,;]{8,})/gi,
+      /(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|client[_-]?secret|private[_-]?key|密码|口令|令牌|密钥)(?:[_-](?:id|value|key|secret|token|string|b64|base64|hash)){0,2}["']?\s*[:=：＝]\s*["'“]?(?<secret>[^\s"'”,;]{8,})/gi,
       undefined,
       value => credentialValue(value, 3),
     ),
@@ -549,15 +579,7 @@ export const DETECTORS: readonly Detector[] = [
     '.',
     value => !/^(?:127\.|0\.0\.0\.0$|255\.255\.255\.255$)/.test(value),
   ),
-  regexDetector(
-    'internal_host',
-    'HOST',
-    ['network'],
-    true,
-    INTERNAL_HOST,
-    undefined,
-    value => !GENERIC_INTERNAL_HOST.test(value),
-  ),
+  { id: 'internal_host', label: 'HOST', groups: ['network'], defaultOn: true, find: findInternalHosts },
   regexDetector(
     'ipv6',
     'IP',

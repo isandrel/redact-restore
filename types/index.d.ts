@@ -66,6 +66,10 @@ export type RedactRestoreScan = {
   readonly ignored: number;
   readonly target?: string;
   readonly files?: number;
+  /** Files a path scan looked at but left out: binary, too large or unreadable. */
+  readonly skipped?: number;
+  /** A path scan stopped before the end of the tree (file, folder or depth limit). */
+  readonly partial?: boolean;
   readonly kinds?: ReadonlyArray<readonly [string, number]>;
 };
 

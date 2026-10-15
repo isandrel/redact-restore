@@ -300,7 +300,8 @@ export function exportRules(rules: readonly StoredRule[], now: Date, patterns: r
 }
 
 /** An import file is an export: JSON whose rules have `value`, and optionally `label` or `alias`. */
-export function parseImport(text: string): { items: ValueRule[]; patterns: PatternRule[] } | { error: string } {
+/** `patterns` is absent when the file has no patterns list (an older export): saved patterns then stay. */
+export function parseImport(text: string): { items: ValueRule[]; patterns?: PatternRule[] } | { error: string } {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -314,11 +315,12 @@ export function parseImport(text: string): { items: ValueRule[]; patterns: Patte
     return { error: 'The file comes from a newer Redact Restore version.' };
   }
   // An entry without a string value is kept as an empty value, so it counts as invalid.
-  const patterns = Array.isArray(data.patterns) ? data.patterns : [];
+  const items = data.rules.map(item => (isRecord(item) ? (valueRuleOf(item) ?? { value: '' }) : { value: '' }));
+  if (!Array.isArray(data.patterns)) return { items };
   return {
-    items: data.rules.map(item => (isRecord(item) ? (valueRuleOf(item) ?? { value: '' }) : { value: '' })),
+    items,
     // A pattern entry without a string pattern is kept empty, so it counts as invalid.
-    patterns: patterns.map(item => (isRecord(item) ? (patternRuleOf(item) ?? EMPTY_PATTERN) : EMPTY_PATTERN)),
+    patterns: data.patterns.map(item => (isRecord(item) ? (patternRuleOf(item) ?? EMPTY_PATTERN) : EMPTY_PATTERN)),
   };
 }
 

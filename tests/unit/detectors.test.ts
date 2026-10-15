@@ -67,6 +67,8 @@ const HIDE: Array<[string, string, string]> = [
   ['IP', 'host 10.20.30.40 is down', '10.20.30.40'],
   ['HOST', 'ssh build.acme.internal now', 'build.acme.internal'],
   ['HOST', 'ping alices-mbp.local', 'alices-mbp.local'],
+  ['HOST', 'curl http://db.internal:5432 now', 'db.internal'],
+  ['ENV', 'run SERVICE_USER=svc-team42 ./deploy.sh', 'svc-team42'],
   ['IP', 'route 2001:db8:85a3::8a2e:370:7334 up', '2001:db8:85a3::8a2e:370:7334'],
   ['IP', 'peer fe80::1ff:fe23:4567:890a', 'fe80::1ff:fe23:4567:890a'],
   ['MAC', 'nic aa:bb:cc:12:34:56', 'aa:bb:cc:12:34:56'],
@@ -77,6 +79,10 @@ const HIDE: Array<[string, string, string]> = [
 ];
 
 const KEEP = [
+  'self.local = threading.local() and settings.local and obj.internal',
+  'LOGGER = logging.getLogger(__name__) and BASE_DIR = Path(__file__)',
+  'if (MODE==RELEASE_BUILD) { token_count: 12345678 }',
+  'NODE_ENV=production CI=true bun run build',
   'meet at 12:30:45 or 9:05',
   'std::vector<int> and a::b::c',
   'reach host.docker.internal from the container',

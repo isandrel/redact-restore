@@ -9,14 +9,13 @@ import {
   ENV_EXAMPLE,
   ENV_FILE,
   GENERIC_ACCOUNTS,
-  INTERNAL_HOST,
   LOCAL_HOST_SUFFIX,
   MIN_CUSTOM_VALUE_LENGTH,
   PUBLIC_GIT_HOSTS,
   SECRET_KEY,
   TRIVIAL_VALUE,
 } from './defaults.ts';
-import { envAssignments } from './detectors.ts';
+import { envAssignments, findInternalHosts } from './detectors.ts';
 import { findPrivateMatches, type MatchingOptions } from './matcher.ts';
 import { fingerprint, ruleKey } from './rules.ts';
 
@@ -195,7 +194,7 @@ export function fileCandidates(
     for (const { key, value } of envAssignments(file.text)) {
       add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`);
     }
-    for (const match of file.text.matchAll(INTERNAL_HOST)) add(match[0], 'HOST', file.name);
+    for (const { start, end } of findInternalHosts(file.text)) add(file.text.slice(start, end), 'HOST', file.name);
   }
   return candidates;
 }

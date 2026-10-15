@@ -10,6 +10,7 @@ import {
   PANE_TITLE,
   SCAN_LOG_AUTHORS,
   SCAN_MAX_DEPTH,
+  SCAN_MAX_DIRS,
   SCAN_MAX_FILE_BYTES,
   SCAN_TIMEOUT_MS,
 } from './defaults.ts';
@@ -75,6 +76,7 @@ import { CUSTOM_LABEL, EMAIL_LABEL } from './placeholder.ts';
 import { keptTools, toolAction, type RestorePolicy } from './policy.ts';
 import {
   auditMessages,
+  createAuditMemo,
   createMasker,
   createStreamRestorer,
   describeFindings,
@@ -85,6 +87,7 @@ import {
   uniqueMatches,
   unmaskText,
   withholdContentBlocks,
+  type AuditMemo,
   type Vault,
 } from './privacy.ts';
 
@@ -122,10 +125,11 @@ async function record(
 ): Promise<void> {
   const stored =
     Object.keys(additions).length > 0 ? await update($, vault, current => ({ ...current, ...additions })) : undefined;
+  if (stored) lastVault = stored;
   if (!change && !stored) return;
   try {
     const counters = change ? await update($, metrics, current => change(current, Date.now())) : await read($, metrics);
-    await publishStatus($, stored ?? (await read($, vault)), counters, config);
+    await publishStatus($, stored ?? (await vaultNow($)), counters, config);
   } catch {
     // Reporting must not block masking.
   }
@@ -205,6 +209,29 @@ interface Context {
   readonly config: RedactRestoreConfig;
   /** Rules from the plugin options (keychain), normalized. */
   readonly optionRules: readonly ValueRule[];
+}
+
+/**
+ * The last vault this module read, for fallbacks (which may not call $): known
+ * values then keep their placeholders, so a failure does not change text the
+ * prompt cache has already seen.
+ */
+let lastVault: Vault = {};
+
+async function vaultNow($: EngineInterface): Promise<Vault> {
+  lastVault = await read($, vault);
+  return lastVault;
+}
+
+// Text the audit found clean, per matching options: new rules or detectors start a fresh memo.
+const auditMemos = new WeakMap<MatchingOptions, AuditMemo>();
+function auditMemoFor(matching: MatchingOptions): AuditMemo {
+  let memo = auditMemos.get(matching);
+  if (!memo) {
+    memo = createAuditMemo();
+    auditMemos.set(matching, memo);
+  }
+  return memo;
 }
 
 /** The home folder on macOS, Linux (HOME) and Windows (USERPROFILE). */
@@ -394,8 +421,8 @@ async function testText($: EngineInterface, ctx: Context, text: string): Promise
     return;
   }
   const matching = matchingFor(ctx, await loadRules($), await read($, patterns));
-  const masked = maskText(text, matching, await read($, vault));
-  const found = uniqueMatches(text, matching, await read($, vault));
+  const masked = maskText(text, matching, await vaultNow($));
+  const found = uniqueMatches(text, matching, await vaultNow($));
   await update($, pane, current => ({ ...current, notice: '', test: { text, masked: masked.text, found } }));
 }
 
@@ -449,17 +476,23 @@ async function scanNow($: EngineInterface, ctx: Context): Promise<ScanView> {
 
 /**
  * Reads the text files under a folder (or one file) for a path scan: skipped
- * folders, binary files and files over the size limit are left out. Nothing
- * read here is sent anywhere; the caller keeps candidates in the pane's state.
+ * folders, binary files and files over the size limit are left out. Every file
+ * looked at counts toward the file limit, read or not. Nothing read here is
+ * sent anywhere; the caller keeps candidates in the pane's state.
  */
 async function readTextFiles(
   $: EngineInterface,
   ctx: Context,
   root: string,
-): Promise<Array<{ name: string; text: string }>> {
+): Promise<{ files: Array<{ name: string; text: string }>; skipped: number; partial: boolean }> {
   const files: Array<{ name: string; text: string }> = [];
   const { skipDirs, maxFiles } = ctx.config.scan;
-  const addFile = async (path: string, name: string) => {
+  let seen = 0;
+  let dirs = 0;
+  let partial = false;
+  const addFile = async (path: string, name: string, size: number) => {
+    seen += 1;
+    if (size > SCAN_MAX_FILE_BYTES) return;
     try {
       const text = String(await $.fs.read(path));
       if (!text.slice(0, 1024).includes('\u0000')) files.push({ name, text });
@@ -468,6 +501,11 @@ async function readTextFiles(
     }
   };
   const walk = async (dir: string, prefix: string, depth: number): Promise<void> => {
+    if (dirs >= SCAN_MAX_DIRS) {
+      partial = true;
+      return;
+    }
+    dirs += 1;
     let entries: readonly { name: string; kind: string; size: number }[];
     try {
       entries = await $.fs.list(dir);
@@ -475,32 +513,37 @@ async function readTextFiles(
       return;
     }
     for (const entry of entries) {
-      if (files.length >= maxFiles) return;
+      if (seen >= maxFiles || dirs > SCAN_MAX_DIRS) {
+        partial = true;
+        return;
+      }
       const path = `${dir}/${entry.name}`;
       const name = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.kind === 'dir') {
-        if (depth < SCAN_MAX_DEPTH && !skipDirs.includes(entry.name)) await walk(path, name, depth + 1);
-      } else if (entry.kind === 'file' && entry.size <= SCAN_MAX_FILE_BYTES) {
-        await addFile(path, name);
+        if (skipDirs.includes(entry.name)) continue;
+        if (depth < SCAN_MAX_DEPTH) await walk(path, name, depth + 1);
+        else partial = true;
+      } else if (entry.kind === 'file') {
+        await addFile(path, name, entry.size);
       }
     }
   };
-  let isDir = true;
+  let stat: { kind: string; size: number } | undefined;
   try {
-    await $.fs.list(root);
+    stat = await $.fs.stat(root);
   } catch {
-    isDir = false;
+    // Missing or unreadable: nothing to read.
   }
-  if (isDir) await walk(root.replace(/[\\/]+$/, '') || root, '', 0);
-  else await addFile(root, root.split(/[\\/]/).pop() ?? root);
-  return files;
+  if (stat?.kind === 'dir') await walk(root.replace(/[\\/]+$/, '') || root, '', 0);
+  else if (stat?.kind === 'file') await addFile(root, root.split(/[\\/]/).pop() ?? root, stat.size);
+  return { files, skipped: seen - files.length, partial };
 }
 
 /** Scans a folder or file on this machine: new candidates to the pane, counts by label to the caller. */
 async function scanPath($: EngineInterface, ctx: Context, target: string): Promise<ScanView> {
   const home = await homeDir($);
   const root = expandHome(target, home);
-  const files = await readTextFiles($, ctx, root);
+  const { files, skipped, partial } = await readTextFiles($, ctx, root);
   const matching = matchingFor(ctx, await loadRules($), await read($, patterns));
   const ignored = await ignoredFingerprints($);
   const envOn = ctx.config.detectorIds.includes('env_assignment');
@@ -509,6 +552,8 @@ async function scanPath($: EngineInterface, ctx: Context, target: string): Promi
     ...(await triage(fileCandidates(files), matching, ignored, candidate => envOn && assigned.has(candidate.value))),
     target: displayPath(root, home),
     files: files.length,
+    ...(skipped ? { skipped } : {}),
+    ...(partial ? { partial } : {}),
     kinds: maskedKinds(files, matching),
   };
   await update($, scanResult, () => result);
@@ -524,7 +569,13 @@ async function rescan($: EngineInterface, ctx: Context): Promise<void> {
 
 /** What a scan tells the model: counts by label, and the path as shown (`~/…`); never a value. */
 function scanSummary(result: ScanView): string {
-  const where = result.target ? `Scan of ${result.target} (${result.files ?? 0} file(s) read)` : 'Scan';
+  const left = [
+    result.skipped ? `${result.skipped} skipped as binary, too large or unreadable` : '',
+    result.partial ? 'stopped at a file, folder or depth limit' : '',
+  ].filter(Boolean);
+  const where = result.target
+    ? `Scan of ${result.target} (${result.files ?? 0} file(s) read${left.length ? `; ${left.join('; ')}` : ''})`
+    : 'Scan';
   const masked = result.kinds?.length
     ? ` Already masked in these files: ${result.kinds.map(([label, count]) => `${count} ${label}`).join(', ')}.`
     : '';
@@ -624,11 +675,19 @@ async function importFrom($: EngineInterface, ctx: Context, args: string): Promi
   const before = await loadRules($, true);
   const beforePatterns = await read($, patterns);
   const mode = replace ? 'replace' : 'merge';
+  // A file without a patterns list (an older export) leaves the saved patterns alone.
+  const patternMode = replace && parsed.patterns ? 'replace' : 'merge';
   const summary = applyImport(before, parsed.items, mode, new Date(), ctx.optionRules);
-  const patternSummary = applyPatternImport(beforePatterns, parsed.patterns, mode, new Date());
+  const patternSummary = applyPatternImport(beforePatterns, parsed.patterns ?? [], patternMode, new Date());
   // Replacing drops every saved rule: only from a file whose every entry is valid.
   const invalid = summary.invalid + patternSummary.invalid;
-  const valid = summary.rules.length + patternSummary.patterns.length;
+  const valid =
+    summary.added +
+    summary.updated +
+    summary.unchanged +
+    patternSummary.added +
+    patternSummary.updated +
+    patternSummary.unchanged;
   if (replace && (invalid > 0 || valid === 0)) {
     return (
       `Nothing imported: --replace needs a file whose entries are all valid (${invalid} invalid, ` +
@@ -638,22 +697,22 @@ async function importFrom($: EngineInterface, ctx: Context, args: string): Promi
   // Write first, then remove: a failed write leaves the old rules in place.
   for (const rule of summary.rules) await putRule($, rule);
   for (const pattern of patternSummary.patterns) await putPattern($, pattern);
-  const keep = new Set(summary.rules.map(rule => ruleKey(rule.value)));
-  for (const rule of before) {
-    if (!keep.has(ruleKey(rule.value))) await $.store.delete(await storeKeyFor(RULE_PREFIX, rule.value));
-  }
-  const keepPatterns = new Set(patternSummary.patterns.map(patternKey));
-  for (const pattern of beforePatterns) {
-    if (!keepPatterns.has(patternKey(pattern))) {
-      await $.store.delete(await storeKeyFor(PATTERN_PREFIX, patternKey(pattern)));
-    }
+  // Replacing removes every other stored key of that kind, unreadable entries included.
+  const keep = new Set([
+    ...(await Promise.all(summary.rules.map(rule => storeKeyFor(RULE_PREFIX, rule.value)))),
+    ...(await Promise.all(patternSummary.patterns.map(one => storeKeyFor(PATTERN_PREFIX, patternKey(one))))),
+  ]);
+  for (const key of await $.store.keys()) {
+    const replaced = (replace && isRuleKey(key)) || (patternMode === 'replace' && isPatternKey(key));
+    if (replaced && !keep.has(key)) await $.store.delete(key);
   }
   const after = await loadRules($);
-  const patternNote =
-    parsed.patterns.length > 0 || replace
-      ? ` Patterns: ${patternSummary.added} added, ${patternSummary.updated} updated, ` +
-        `${patternSummary.unchanged} unchanged, ${patternSummary.invalid} skipped as invalid; ` +
-        `${(await read($, patterns)).length} saved now.`
+  const patternNote = parsed.patterns
+    ? ` Patterns: ${patternSummary.added} added, ${patternSummary.updated} updated, ` +
+      `${patternSummary.unchanged} unchanged, ${patternSummary.invalid} skipped as invalid; ` +
+      `${(await read($, patterns)).length} saved now.`
+    : replace && beforePatterns.length
+      ? ` The file has no patterns list: the ${beforePatterns.length} saved pattern(s) are kept.`
       : '';
   return (
     `Imported from ${displayPath(path, home)} (${replace ? 'replaced all saved rules' : 'merged'}): ` +
@@ -667,7 +726,7 @@ async function statusText($: EngineInterface, ctx: Context): Promise<string> {
   const stored = await loadRules($);
   const counters = await read($, metrics);
   const stats = statusStats(
-    await read($, vault),
+    await vaultNow($),
     {
       mode: config.restore.mode,
       audit: config.outboundAudit,
@@ -692,7 +751,7 @@ async function statusText($: EngineInterface, ctx: Context): Promise<string> {
 
 async function sessionNow($: EngineInterface, ctx: Context, savedRules: number): Promise<SessionView> {
   const { config } = ctx;
-  const current = await read($, vault);
+  const current = await vaultNow($);
   const counters = await read($, metrics);
   const stats = statusStats(
     current,
@@ -769,6 +828,7 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
       await update($, vault, () => ({}));
+      lastVault = {};
       const previous = await read($, metrics);
       await update($, metrics, () => emptyMetrics(Date.now(), previous.version, previous.surface));
       await record($, config, {}, (m, now) => ({ ...m, lastEvent: 'clear', updatedAt: now }));
@@ -789,7 +849,7 @@ export const register: Register = (on, options) => {
       await recordHookError($, config, 'rules');
       return { drop: MESSAGES.rulesUnreadable };
     }
-    const masker = createMasker(matchingFor(ctx, stored, await read($, patterns)), await read($, vault));
+    const masker = createMasker(matchingFor(ctx, stored, await read($, patterns)), await vaultNow($));
     const text = masker.mask(e.text);
     const context = e.context?.map(item => masker.mask(item));
     await record(
@@ -808,7 +868,7 @@ export const register: Register = (on, options) => {
   // Context blocks of the first user message: CLAUDE.md files and `userEmail`.
   on('prompt.context', async ($, e, next) => {
     if (!config.enabled) return next(e);
-    const masker = createMasker(await currentMatching($, ctx), await read($, vault));
+    const masker = createMasker(await currentMatching($, ctx), await vaultNow($));
     const blocks = e.blocks.map(block => ({ ...block, text: masker.mask(block.text) }));
     await record(
       $,
@@ -823,14 +883,14 @@ export const register: Register = (on, options) => {
     await recordHookError($, config, 'prompt.context');
     // Mask without recording: the originals cannot be restored, but none leak.
     return next({
-      blocks: e.blocks.map(block => ({ ...block, text: maskText(block.text, fallbackMatching(ctx), {}).text })),
+      blocks: e.blocks.map(block => ({ ...block, text: maskText(block.text, fallbackMatching(ctx), lastVault).text })),
     });
   });
 
   // Reminders, mentioned files and hook context the engine injects per request.
   on('prompt.attachment', async ($, e, next) => {
     if (!config.enabled) return next(e);
-    const masked = maskText(e.text, await currentMatching($, ctx), await read($, vault));
+    const masked = maskText(e.text, await currentMatching($, ctx), await vaultNow($));
     await record(
       $,
       config,
@@ -849,7 +909,7 @@ export const register: Register = (on, options) => {
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e);
     if (!config.enabled) return composed;
-    const masker = createMasker(await currentMatching($, ctx), await read($, vault));
+    const masker = createMasker(await currentMatching($, ctx), await vaultNow($));
     const sections = composed.sections.map(section => ({ ...section, text: masker.mask(section.text) }));
     await record(
       $,
@@ -857,7 +917,7 @@ export const register: Register = (on, options) => {
       masker.additions(),
       masker.count() > 0 ? metricsChange.masked('systemPrompt', masker.count(), 'prompt.compose') : undefined,
     );
-    return { sections: [...sections, placeholderSection(config, await currentMatching($, ctx))] };
+    return { sections: [...sections, placeholderSection(config)] };
   }).catch(async ($, e, next) => {
     const composed = await next(e);
     if (!config.enabled) return composed;
@@ -866,16 +926,16 @@ export const register: Register = (on, options) => {
       sections: [
         ...composed.sections.map(section => ({
           ...section,
-          text: maskText(section.text, fallbackMatching(ctx), {}).text,
+          text: maskText(section.text, fallbackMatching(ctx), lastVault).text,
         })),
-        placeholderSection(config, fallbackMatching(ctx)),
+        placeholderSection(config),
       ],
     };
   });
 
   on('session.append', async ($, e, next) => {
     if (!config.enabled) return next(e);
-    const result = maskContentBlocks(e.message.content, await currentMatching($, ctx), await read($, vault), policy);
+    const result = maskContentBlocks(e.message.content, await currentMatching($, ctx), await vaultNow($), policy);
     const changes = [
       ...(result.count > 0 ? [metricsChange.masked('conversation', result.count, 'session.append')] : []),
       ...(result.withheldMedia > 0 ? [metricsChange.media(result.withheldMedia)] : []),
@@ -887,7 +947,7 @@ export const register: Register = (on, options) => {
     await recordHookError($, config, 'session.append');
     let content;
     try {
-      content = maskContentBlocks(e.message.content, fallbackMatching(ctx), {}, policy).content;
+      content = maskContentBlocks(e.message.content, fallbackMatching(ctx), lastVault, policy).content;
     } catch {
       content = withholdContentBlocks(e.message.content);
     }
@@ -900,7 +960,7 @@ export const register: Register = (on, options) => {
     if (!config.enabled) return yield* next(e);
     const streamRestore = config.restoreDisplay && config.restoreStreaming && e.agentId === undefined;
     if (!config.outboundAudit)
-      return streamRestore ? yield* restoreStream(next(e), await read($, vault), config) : yield* next(e);
+      return streamRestore ? yield* restoreStream(next(e), await vaultNow($), config) : yield* next(e);
     const messages =
       e.agentId === undefined
         ? await $.session.messages({ as: 'api' })
@@ -910,7 +970,8 @@ export const register: Register = (on, options) => {
       await record($, config, {}, metricsChange.audit({ kind: 'unreadable', message: -1, block: '' }));
       return refusedStep(e);
     }
-    const findings = auditMessages(messages, await currentMatching($, ctx), await read($, vault), policy);
+    const auditMatching = await currentMatching($, ctx);
+    const findings = auditMessages(messages, auditMatching, await vaultNow($), policy, auditMemoFor(auditMatching));
     const first = findings[0];
     await record(
       $,
@@ -927,7 +988,7 @@ export const register: Register = (on, options) => {
       );
       return refusedStep(e);
     }
-    return streamRestore ? yield* restoreStream(next(e), await read($, vault), config) : yield* next(e);
+    return streamRestore ? yield* restoreStream(next(e), await vaultNow($), config) : yield* next(e);
   }).catch(async function* ($, e, next) {
     if (next.called) return yield* next(e);
     await recordHookError($, config, 'turn.step');
@@ -938,7 +999,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     if (!config.enabled) return next(e);
     const { tool, tool_use_id: _id, agentId: _agent, ...input } = e;
-    const current = await read($, vault);
+    const current = await vaultNow($);
     if (!inputHasPlaceholder(input, current, config.placeholders)) return next(e);
     const action = toolAction(String(tool), config.restore);
     if (action === 'keep') {
@@ -1057,18 +1118,23 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     if (!config.enabled || !config.restoreDisplay) return next(e);
-    const text = unmaskText(e.props.text, await read($, vault), false, config.placeholders);
+    const text = unmaskText(e.props.text, await vaultNow($), false, config.placeholders);
     return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } });
   });
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!config.enabled || !config.restoreDisplay) return next(e);
-    const text = unmaskText(e.props.text, await read($, vault), false, config.placeholders);
+    const text = unmaskText(e.props.text, await vaultNow($), false, config.placeholders);
     return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } });
   });
 };
 
 /** Tells the model what placeholders are; carries no private value. */
-function placeholderSection(config: RedactRestoreConfig, matching: MatchingOptions) {
+/**
+ * The note for the model. Its text depends only on the options, never on rules
+ * that change during a session: the system prompt must stay byte-identical so
+ * the provider's prompt cache keeps hitting.
+ */
+function placeholderSection(config: RedactRestoreConfig) {
   const restore = config.restore;
   const tools =
     restore.mode === 'all'
@@ -1078,9 +1144,7 @@ function placeholderSection(config: RedactRestoreConfig, matching: MatchingOptio
         : 'Tools receive the placeholder text unchanged';
   const kept =
     restore.mode !== 'none' ? `, except ${keptTools(restore).join(', ')}, which receive the placeholder text` : '';
-  const aliases = [...(matching.rules?.values() ?? [])].some(rule => rule.alias !== undefined)
-    ? ' Some values use a fixed stand-in name instead; treat those the same way.'
-    : '';
+  const aliases = ' Some values use a fixed stand-in name instead; treat those the same way.';
   const scheme = config.placeholders;
   return {
     id: 'redact-restore:placeholders',

@@ -140,7 +140,7 @@
     "scan_max_files": {
       "type": "number",
       "title": "Files a path scan reads at most",
-      "description": "How many text files /redact-restore scan PATH reads before it stops (default 2000, at most 20000). Files over 256 KiB and binary files are skipped.",
+      "description": "How many files /redact-restore scan PATH looks at, read or skipped, before it stops (default 2000, at most 20000). Files over 256 KiB and binary files are skipped.",
       "default": 2000
     },
     "rule_labels": {

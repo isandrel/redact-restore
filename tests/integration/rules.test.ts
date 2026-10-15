@@ -22,7 +22,7 @@ type Entry = { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number
 
 function world(
   on: On,
-  store: Record<string, unknown> | 'broken' = {},
+  store: Record<string, unknown> | Map<string, unknown> | 'broken' = {},
   files: Record<string, string> = {},
   tree: Record<string, Entry[]> = {},
 ): World {
@@ -31,6 +31,18 @@ function world(
     on('store.keys', () => ({ deny: 'store unreadable' }) as never);
     on('store.get', () => ({ deny: 'store unreadable' }) as never);
     on('store.set', () => ({ deny: 'store unreadable' }) as never);
+  } else if (store instanceof Map) {
+    // A store the test can read back afterwards.
+    on('store.keys', () => ({ value: [...store.keys()] }) as never);
+    on('store.get', ($, e) => ({ value: store.get(e.key) }) as never);
+    on('store.set', ($, e) => {
+      store.set(e.key, e.value);
+      return { value: undefined } as never;
+    });
+    on('store.delete', ($, e) => {
+      store.delete(e.key);
+      return { value: undefined } as never;
+    });
   } else mock.store(on, store);
   mock.env(on, { HOME });
   on('fs.list', ($, e) => {
@@ -38,6 +50,12 @@ function world(
     if (listed) return { value: listed[1] } as never;
     if (Object.keys(tree).length > 0) return { deny: 'ENOTDIR' } as never;
     return { value: [{ name: '.env', kind: 'file', size: 40, mtimeMs: 0, isLink: false }] } as never;
+  });
+  on('fs.stat', ($, e) => {
+    const stat = (kind: 'file' | 'dir', size: number) => ({ value: { kind, size, mtimeMs: 0, isLink: false } });
+    if (Object.keys(tree).some(dir => e.path.endsWith(dir))) return stat('dir', 0) as never;
+    const hit = [...seen.files.entries()].find(([path]) => e.path.endsWith(path));
+    return (hit ? stat('file', hit[1].length) : { deny: 'ENOENT' }) as never;
   });
   on('fs.read', ($, e) => {
     const hit = [...seen.files.entries()].find(([path]) => e.path.endsWith(path));
@@ -359,7 +377,7 @@ describe('path scan', () => {
       );
       const text = await run($, 'scan ~/proj');
       expect(text).toBe(
-        'Scan of ~/proj (2 file(s) read) found 1 new candidate(s) (1 HOST); 1 already masked, 0 ignored before. ' +
+        'Scan of ~/proj (2 file(s) read; 2 skipped as binary, too large or unreadable) found 1 new candidate(s) (1 HOST); 1 already masked, 0 ignored before. ' +
           'Already masked in these files: 1 ENV. Review them in the Redact Restore pane. Values are shown only there, on this machine.',
       );
       for (const value of ['bluefalcon-internal', 'build.acme.internal', '/home/user'])
@@ -439,6 +457,36 @@ describe('import and export', () => {
     expect(await masks($, seen, NAME)).toBe(true);
   });
 
+  test('--replace keeps saved patterns for a file without a patterns list, and clears unreadable entries', async ($, on) => {
+    const saved = {
+      pattern: 'ACME-\\d{4}',
+      ignoreCase: false,
+      wholeWord: true,
+      group: 0,
+      source: 'manual',
+      addedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const store = new Map<string, unknown>([
+      [`pattern.${'a'.repeat(64)}`, saved],
+      [`pattern.${'b'.repeat(64)}`, { pattern: 'acme(a+)+' }],
+    ]);
+    const seen = world(on, store, {
+      '/tmp/old.json': exportFile([{ value: NAME }]),
+      '/tmp/new.json': JSON.stringify({
+        format: 'redact-restore-rules',
+        version: 1,
+        rules: [{ value: NAME }],
+        patterns: [],
+      }),
+    });
+    expect(await run($, 'import /tmp/old.json --replace')).toMatch(
+      /no patterns list: the 1 saved pattern\(s\) are kept/,
+    );
+    expect(await masks($, seen, 'ACME-1234')).toBe(true);
+    expect(await run($, 'import /tmp/new.json --replace')).toMatch(/0 saved now/);
+    expect([...store.keys()].filter(key => key.startsWith('pattern.'))).toEqual([]);
+  });
+
   test('a missing or foreign file imports nothing', async ($, on) => {
     world(on, {}, { '/tmp/other.json': '{"format":"other","rules":[]}' });
     expect(await run($, 'import /tmp/missing.json')).toBe('Could not read /tmp/missing.json.');
@@ -476,9 +524,9 @@ describe('pattern rules in the pane', () => {
     await run($, 'rules');
     const pane = await mountPane($, 'desktop');
     await pane.select({ key: 'draft-kind', value: 'pattern' });
-    await pane.input({ key: 'draft-pattern', text: '(a+)+b', kind: 'change' });
-    await pane.input({ key: 'draft-example', text: 'aaab' });
-    await eventually(async () => (await pane.find({ text: /holds another repetition/ })) !== undefined);
+    await pane.input({ key: 'draft-pattern', text: 'acme(a+)+b', kind: 'change' });
+    await pane.input({ key: 'draft-example', text: 'acmeaaab' });
+    await eventually(async () => (await pane.find({ text: /Repeat single characters or classes/ })) !== undefined);
     expect(await run($, 'status')).toMatch(/patterns: 0 saved/);
   });
 
@@ -501,7 +549,7 @@ describe('pattern rules in the pane', () => {
           format: 'redact-restore-rules',
           version: 1,
           rules: [],
-          patterns: [{ pattern: 'ACME-\\d{4}', label: 'TOKEN' }, { pattern: '(a|aa)+' }],
+          patterns: [{ pattern: 'ACME-\\d{4}', label: 'TOKEN' }, { pattern: 'acme(a|aa)+' }],
         }),
       },
     );

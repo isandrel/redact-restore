@@ -188,6 +188,13 @@ describe('path scan', () => {
     ]);
   });
 
+  test('host candidates skip code and generic names, as the detector does', () => {
+    const code = [
+      { name: 'app.py', text: 'self.local = threading.local()\nurl = "http://host.docker.internal:8080"\n' },
+    ];
+    expect(fileCandidates(code)).toEqual([]);
+  });
+
   test('values masked anyway are counted by label, distinct values only', async () => {
     const { matching } = parseConfig({});
     expect(maskedKinds([...files, files[1] ?? { text: '' }], matching)).toEqual([

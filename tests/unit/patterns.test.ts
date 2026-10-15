@@ -36,19 +36,36 @@ describe('pattern checks', () => {
       [rule('  '), 'empty'],
       [rule('x'.repeat(513)), 'too-long'],
       [rule('(unclosed'), 'invalid'],
-      [rule('(a)\\1b'), 'backreference'],
-      [rule('(a+)+b'), 'nested-quantifier'],
-      [rule('(\\w*)*x'), 'nested-quantifier'],
-      [rule('(.*a){12}'), 'nested-quantifier'],
-      [rule('(a|aa)+b'), 'quantified-alternation'],
-      [rule('a*'), 'matches-empty'],
+      [rule('[A-Z]\\-\\d+'), 'invalid'],
+      [rule('x+)+(?:y'), 'invalid'],
+      [rule('(acme)\\1x'), 'backreference'],
+      [rule('(?=.)acme'), 'lookaround'],
+      [rule('acme(a+)+b'), 'group-quantifier'],
+      [rule('acme(?:b{1,2})+c'), 'group-quantifier'],
+      [rule('acme((?:b|bb))+c'), 'group-quantifier'],
+      [rule('acme-\\w+-\\w+-\\w+'), 'too-many-repeats'],
+      [rule('\\s+X'), 'no-keyword'],
+      [rule('token_[a-z]{4}|key_[a-z]{4}'), 'no-keyword'],
+      [rule('\\b'), 'no-keyword'],
       [rule('key=(\\w+)', { group: 2 }), 'no-group'],
       [rule('ACME-\\d{4}', { label: '1bad' }), 'invalid-label'],
       [rule('ACME-\\d{4}', { example: 'nothing here' }), 'example-no-match'],
-      [rule('k=(\\w+)', { group: 1, example: 'k=ab' }), 'example-too-short'],
-      [rule('\\d+\\s*\\d+\\s*\\d+x'), 'slow'],
+      [rule('key=(\\w+)', { group: 1, example: 'key=ab' }), 'example-too-short'],
     ];
     for (const [input, problem] of cases) expect(patternProblem(input)).toBe(problem);
+    // Safe shapes that an earlier check refused.
+    for (const ok of ['C:\\\\1\\d+', '[a-z0-9.-]+\\.corp\\.example', 'user=\\w+;pass=(\\w+)']) {
+      expect(patternProblem(rule(ok, ok.includes('(') ? { group: 1 } : {}))).toBeUndefined();
+    }
+  });
+
+  test('patterns that once passed and then hung stay fast: the regex runs only near its keyword', () => {
+    const slow = rule('\\w+@acme\\.example', { wholeWord: false });
+    const text = `${'a'.repeat(200_000)}x ${'f'.repeat(200_000)}`;
+    const started = performance.now();
+    expect(spans(slow, text)).toEqual([]);
+    expect(spans(rule('[a-f0-9]+-secret', { wholeWord: false }), `${'0'.repeat(200_000)}-secre`)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(200);
   });
 });
 
@@ -64,6 +81,19 @@ describe('pattern matching', () => {
     expect(spans(rule('ticket=(\\w+)', { group: 1 }), 'see ticket=Zq7Lm2Xk ok')).toEqual(['Zq7Lm2Xk']);
   });
 
+  test('a capture group masks its own position, not an earlier copy of its text', () => {
+    expect(
+      patternDetector(rule('user=\\w+;pass=(\\w+)', { group: 1 }), 't').find('user=hunter22x;pass=hunter2'),
+    ).toEqual([{ start: 20, end: 27 }]);
+  });
+
+  test('every match is masked, however many; a value longer than the window is masked whole', () => {
+    const many = Array.from({ length: 1500 }, (_, i) => `ACME-${String(i).padStart(4, '0')}`).join(' ');
+    expect(spans(rule('ACME-\\d{4}'), many)).toHaveLength(1500);
+    const long = `${'x'.repeat(400)}@acme.example`;
+    expect(spans(rule('\\w+@acme\\.example', { wholeWord: false }), `mail ${long} now`)).toEqual([long]);
+  });
+
   test('a pattern rule masks under its label and beats a built-in detector', () => {
     const base = parseConfig({}).matching;
     const matching = {
@@ -75,7 +105,7 @@ describe('pattern matching', () => {
   });
 
   test('custom_patterns from the options: valid ones mask, invalid ones are counted', () => {
-    const config = parseConfig({ custom_patterns: ['ACME-\\d{4}', '(a+)+b', '  '] });
+    const config = parseConfig({ custom_patterns: ['ACME-\\d{4}', 'acme(a+)+b', '  '] });
     expect([config.optionPatterns.length, config.invalidPatterns]).toEqual([1, 1]);
     expect(findPrivateMatches('id ACME-1234', config.matching).map(m => [m.category, m.value])).toEqual([
       ['CUSTOM', 'ACME-1234'],
@@ -97,19 +127,28 @@ describe('exact values: per-rule ignore case', () => {
   });
 });
 
+describe('exact values: spellings that disagree on case', () => {
+  test('if any spelling ignores case, every spelling does', () => {
+    const base = parseConfig({}).matching;
+    const merged = normalizeRules([{ value: 'Acme Corp' }, { value: 'acme corp', ignoreCase: true }]);
+    const options = { ...base, customValues: merged.values, rules: merged.rules };
+    expect(findPrivateMatches('ACME CORP', options).map(m => m.value)).toEqual(['ACME CORP']);
+  });
+});
+
 describe('stored patterns', () => {
   test('the example is checked and never stored; CUSTOM is the default label', () => {
     const made = makePattern(rule('ACME-\\d{4}', { label: 'CUSTOM', example: 'ACME-1234' }), 'manual', NOW);
     if (!('pattern' in made)) throw new Error(made.problem);
     expect(JSON.stringify(made.pattern)).not.toContain('ACME-1234');
     expect(made.pattern.label).toBeUndefined();
-    expect(makePattern(rule('(a+)+'), 'manual', NOW)).toEqual({ problem: 'nested-quantifier' });
+    expect(makePattern(rule('acme(a+)+'), 'manual', NOW)).toEqual({ problem: 'group-quantifier' });
   });
 
   test('loading drops malformed or risky entries; upsert updates the label in place', () => {
     const loaded = parseStoredPatterns([
       { pattern: 'ACME-\\d{4}', label: 'TOKEN', source: 'manual', addedAt: '2026-01-01T00:00:00.000Z' },
-      { pattern: '(a+)+', source: 'manual' },
+      { pattern: 'acme(a+)+', source: 'manual' },
       { label: 'NOPATTERN' },
       'text',
     ]);
@@ -130,7 +169,7 @@ describe('stored patterns', () => {
     expect(parsed.patterns).toEqual([
       { pattern: 'ACME-\\d{4}', label: 'TOKEN', ignoreCase: true, wholeWord: true, group: 0 },
     ]);
-    const summary = applyPatternImport([], [...parsed.patterns, rule('(a|aa)+')], 'merge', NOW);
+    const summary = applyPatternImport([], [...(parsed.patterns ?? []), rule('acme(a|aa)+')], 'merge', NOW);
     expect([summary.added, summary.invalid]).toEqual([1, 1]);
   });
 });
