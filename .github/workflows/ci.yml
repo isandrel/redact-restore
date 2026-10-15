@@ -16,7 +16,7 @@ permissions:
 
 env:
   # The CLI runs only offline commands here (validate, test); no login is needed.
-  CLAUDE_CODE_VERSION: 2.1.287
+  CLAUDE_CODE_VERSION: 2.1.292
   DISABLE_AUTOUPDATER: 1
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
 
