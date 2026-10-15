@@ -11,6 +11,7 @@ All options are set in a terminal Claude Code session: `/plugin` → **Installed
 | `status_format`           | empty                      | Template replacing the preset, e.g. `{state} 🔒{masked} +{lastTurn} ⛔{blocked}`. Fields listed in [Status fields](#status-fields)                                                                                                                                                                                                                           |
 | `status_file`             | `false`                    | Write counts to `~/.claude/redact-restore/status/<session_id>.json` for your own `statusLine` script                                                                                                                                                                                                                                                         |
 | `custom_values`           | —                          | Exact private values, one per entry; stored in secure storage (`sensitive`). Entries under 3 characters are ignored. Each entry is one value, matched exactly as typed; labels and aliases are set in the rules pane                                                                                                                                         |
+| `custom_patterns`         | —                          | Regular expressions for private values, one per entry, stored like `custom_values`. Each entry is one JavaScript regex source used whole (nothing in it is parsed), matched as a whole word, masked as `CUSTOM`; `custom_case_insensitive` applies. Entries that fail the [pattern checks](#pattern-rules) are skipped and counted in a toast                |
 | `custom_case_insensitive` | `false`                    | Match custom values regardless of case                                                                                                                                                                                                                                                                                                                       |
 | `redact_emails`           | `true`                     | Detect email addresses                                                                                                                                                                                                                                                                                                                                       |
 | `enable_detectors`        | empty                      | Extra detector ids or groups to turn on (`all`, `gitleaks`, `gitleaks.<id>`, …)                                                                                                                                                                                                                                                                              |
@@ -42,6 +43,30 @@ Values in the plugin options always use the `CUSTOM` label.
 
 A fixed alias is restored wherever it appears as a whole word, so it must look unlike ordinary text: at least 4 characters, no spaces, and an underscore, a digit, or two capitals. An alias must also not overlap any other rule's value (in the options or saved), and two values cannot share one. The pane and imports refuse such a rule; if one is found in the merged rules anyway, its alias is dropped and the value is still masked with the default label; an invalid `placeholder_format` falls back to the default with a toast explaining why. Placeholders minted in an earlier format still restore after you change it.
 
+## Pattern rules
+
+Pick **Pattern** as the rule type in `/redact-restore rules` to mask every match of a regular expression, for example an internal token format. Each pattern is a set of fields:
+
+| Field                 | Meaning                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| Pattern               | A JavaScript regex source, without slashes or flags (`ACME-[A-Z0-9]{16}`)                 |
+| Example it must match | A made-up sample, checked when you save and never stored                                  |
+| Label                 | The placeholder label, from the same list as exact values                                 |
+| Ignore case           | Follow `custom_case_insensitive`, or yes / no for this rule                               |
+| Whole word            | On by default: no letter or digit may touch either end of the match                       |
+| Mask                  | The whole match, or one capture group (`ticket=(\w+)` with group 1 masks only the ticket) |
+
+Pattern rules rank with exact values, above the built-in detectors. JavaScript has no regex timeout, so a pattern is checked before it is saved and refused with the reason when it:
+
+- does not compile, is longer than 512 characters, or names a capture group it does not have;
+- uses a backreference (`\1`, `\k<name>`);
+- repeats a group whose body repeats (`(a+)+`, `(\w*)*`, `(.*a){12}`) or holds alternatives (`(a|aa)+`; use a class such as `[ab]+`);
+- matches empty text;
+- runs past 50 ms on adversarial input (long runs of `a`, `0`, spaces and similar, followed by a mismatch), checked at growing sizes so a slow pattern fails early;
+- does not match its example, or masks fewer than 3 characters of it.
+
+Exact values can ignore case on their own too: the form's **Ignore case** follows `custom_case_insensitive` by default, or says yes or no for that value.
+
 ## Saved rules: pane, scan, import and export
 
 Besides the options, rules can live in the plugin store. Both sets are merged when matching; for the same value, the options win.
@@ -61,7 +86,7 @@ The plugin store is a JSON file of the plugin's own in your Claude Code configur
 | `/redact-restore session`                   | Opens the pane's **Session** tab: this session's state, counts by kind, source and tool, audits, settings, and every placeholder made (values masked until **Show values**)                                                                                                                                                                                                                                                                                                                                                                           |
 | `/redact-restore status`                    | Rule counts, detectors, this session's counts and settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `/redact-restore export [file]`             | Writes the saved rules to `~/.claude/redact-restore/redact-restore-rules.json` or the given file. Plain text: keep it out of version control and delete it after importing                                                                                                                                                                                                                                                                                                                                                                            |
-| `/redact-restore import <file> [--replace]` | Merges an export file (JSON with `value`, `label` and `alias` fields; nothing is parsed from text) into the saved rules; `--replace` replaces the saved rules, and is refused unless every entry is valid                                                                                                                                                                                                                                                                                                                                             |
+| `/redact-restore import <file> [--replace]` | Merges an export file (JSON: `rules` with `value`, `label`, `alias`, `ignoreCase`, and `patterns` with `pattern`, `label`, `ignoreCase`, `wholeWord`, `group`; nothing is parsed from text) into the saved rules and patterns; `--replace` replaces the saved rules, and is refused unless every entry is valid                                                                                                                                                                                                                                       |
 
 The command's output reaches the model, so it holds counts, labels and paths only. A value already in the conversation was sent before its rule existed: the pre-send audit then blocks the next request until you `/clear` or `/rewind`. A removed rule keeps masking in the current session (the session remembers what it has masked) until `/clear`.
 

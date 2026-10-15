@@ -6,8 +6,9 @@
 import type { Elements } from 'claude-code';
 import { CUSTOM_LABEL, SESSION_PLACEHOLDER_LIMIT } from './defaults.ts';
 import type { Metrics } from './metrics.ts';
+import { describePatternProblem, patternDetector, patternProblem, type PatternRule } from './patterns.ts';
 import { LABEL_PATTERN, type PlaceholderScheme, type ValueRule } from './placeholder.ts';
-import { maskPreview, type RuleProblem, type StoredRule } from './rules.ts';
+import { maskPreview, type RuleProblem, type StoredPattern, type StoredRule } from './rules.ts';
 import type { ScanCandidate } from './scan.ts';
 import type { StatusStats } from './status.ts';
 
@@ -84,7 +85,12 @@ function clock(ms: number): string {
 export type DraftMode = 'label' | 'alias';
 
 /** The rule form: what the person has typed and picked so far (this screen only). */
+export type DraftKind = 'value' | 'pattern';
+export type DraftCase = 'default' | 'yes' | 'no';
+
 export interface RuleDraft {
+  /** An exact value, or a pattern (regex). */
+  readonly kind: DraftKind;
   readonly value: string;
   readonly mode: DraftMode;
   readonly label: string;
@@ -93,9 +99,23 @@ export interface RuleDraft {
   readonly alias: string;
   /** The form was filled from a saved rule; saving updates it. */
   readonly editing: boolean;
+  /** Ignore case: follow the `custom_case_insensitive` option, or yes / no for this rule. */
+  readonly ignoreCase: DraftCase;
+  readonly pattern: string;
+  readonly wholeWord: boolean;
+  /** 0 masks the whole match; N masks capture group N. */
+  readonly group: number;
+  /** A sample the pattern must match; checked on save, never stored. */
+  readonly example: string;
 }
 
 export const EMPTY_DRAFT: RuleDraft = {
+  kind: 'value',
+  ignoreCase: 'default',
+  pattern: '',
+  wholeWord: true,
+  group: 0,
+  example: '',
   value: '',
   mode: 'label',
   label: CUSTOM_LABEL,
@@ -137,6 +157,11 @@ export interface PaneData {
   readonly example: (label: string) => string;
   /** Labels offered in the rule form (see `formLabels`). */
   readonly labels: readonly string[];
+  readonly patterns: readonly StoredPattern[];
+  /** Patterns from the plugin options (keychain), counted only. */
+  readonly optionPatterns: number;
+  /** The `custom_case_insensitive` option: what "Follow the option" means. */
+  readonly caseDefault: boolean;
 }
 
 export interface PaneActions {
@@ -148,6 +173,7 @@ export interface PaneActions {
   clearDraft(): void;
   edit(rule: StoredRule): void;
   remove(value: string): void;
+  removePattern(pattern: StoredPattern): void;
   scan(): void;
   accept(candidate: ScanCandidate): void;
   acceptAll(): void;
@@ -168,11 +194,43 @@ const OTHER_LABEL = '__other';
 
 /** What is missing or wrong in the form before it can be saved (the full check runs on save). */
 export function draftProblem(draft: RuleDraft): RuleProblem | undefined {
+  if (draft.kind === 'pattern') {
+    const label = draft.label.trim();
+    if (!label) return 'no-label';
+    return LABEL_PATTERN.test(label) ? undefined : 'invalid-label';
+  }
   if (!draft.value.trim()) return 'empty';
   if (draft.mode === 'alias') return draft.alias.trim() ? undefined : 'no-alias';
   const label = draft.label.trim();
   if (!label) return 'no-label';
   return LABEL_PATTERN.test(label) ? undefined : 'invalid-label';
+}
+
+/** The pattern rule the form describes; `caseDefault` is the `custom_case_insensitive` option. */
+export function draftPattern(draft: RuleDraft, caseDefault: boolean): PatternRule {
+  const label = draft.label.trim().toUpperCase();
+  return {
+    pattern: draft.pattern.trim(),
+    ...(label && label !== CUSTOM_LABEL ? { label } : {}),
+    ignoreCase: draft.ignoreCase === 'default' ? caseDefault : draft.ignoreCase === 'yes',
+    wholeWord: draft.wholeWord,
+    group: draft.group,
+    example: draft.example,
+  };
+}
+
+/** A pattern's example as the model would see it, or why the pattern cannot be saved yet. */
+export function patternPreview(draft: RuleDraft, caseDefault: boolean, example: (label: string) => string): string {
+  if (!draft.pattern.trim()) return '(type a pattern and an example it must match)';
+  const rule = draftPattern(draft, caseDefault);
+  const problem = patternProblem(rule);
+  if (problem) return `(${describePatternProblem(problem)})`;
+  const spans = patternDetector(rule, 'preview').find(draft.example);
+  let text = draft.example;
+  for (const { start, end } of [...spans].reverse()) {
+    text = `${text.slice(0, start)}${example(rule.label ?? CUSTOM_LABEL)}${text.slice(end)}`;
+  }
+  return text;
 }
 
 /** What the model would see for the form as filled in. */
@@ -190,9 +248,14 @@ export function formLabels(configured: readonly string[], rules: ReadonlyArray<P
 }
 
 /** The form filled from a saved rule, for editing its label or alias. */
-export function draftFrom(rule: Pick<StoredRule, 'value' | 'label' | 'alias'>, labels: readonly string[]): RuleDraft {
+export function draftFrom(
+  rule: Pick<StoredRule, 'value' | 'label' | 'alias' | 'ignoreCase'>,
+  labels: readonly string[],
+): RuleDraft {
   const label = rule.label ?? CUSTOM_LABEL;
   return {
+    ...EMPTY_DRAFT,
+    ignoreCase: rule.ignoreCase === undefined ? 'default' : rule.ignoreCase ? 'yes' : 'no',
     value: rule.value,
     mode: rule.alias ? 'alias' : 'label',
     label,
@@ -429,7 +492,29 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
       {data.canType && Input && Select ? (
         <Box key="form" flexDirection="column" borderStyle="round" paddingX={1}>
           <Text bold>{draft.editing ? 'Edit rule' : 'Add a rule'}</Text>
-          {draft.editing ? (
+          {draft.editing ? null : (
+            <Select
+              key="draft-kind"
+              label="Rule type"
+              value={draft.kind}
+              options={[
+                { value: 'value', label: 'Exact value' },
+                { value: 'pattern', label: 'Pattern (regular expression)' },
+              ]}
+              onSelect={kind => act.setDraft({ kind: kind === 'pattern' ? 'pattern' : 'value' })}
+            />
+          )}
+          {draft.kind === 'pattern' ? (
+            <Input
+              key="draft-pattern"
+              label="Pattern"
+              placeholder="e.g. ACME-[A-Z0-9]{16}"
+              value={draft.pattern}
+              autoFocus
+              onInput={pattern => act.setDraft({ pattern })}
+              onSubmit={pattern => act.setDraft({ pattern })}
+            />
+          ) : draft.editing ? (
             <Box flexDirection="row" gap={1}>
               <Text>Private value:</Text>
               <Text>{shown(draft.value)}</Text>
@@ -447,17 +532,29 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
               onSubmit={value => act.saveDraft({ value })}
             />
           )}
-          <Select
-            key="draft-mode"
-            label="Replace with"
-            value={draft.mode}
-            options={[
-              { value: 'label', label: 'Placeholder with a label' },
-              { value: 'alias', label: 'Fixed alias' },
-            ]}
-            onSelect={mode => act.setDraft({ mode: mode === 'alias' ? 'alias' : 'label' })}
-          />
-          {draft.mode === 'label' ? (
+          {draft.kind === 'pattern' ? (
+            <Input
+              key="draft-example"
+              label="Example it must match"
+              placeholder="a made-up sample, e.g. ACME-0000AAAA1111BBBB"
+              value={draft.example}
+              submitLabel="save"
+              onInput={example => act.setDraft({ example })}
+              onSubmit={example => act.saveDraft({ example })}
+            />
+          ) : (
+            <Select
+              key="draft-mode"
+              label="Replace with"
+              value={draft.mode}
+              options={[
+                { value: 'label', label: 'Placeholder with a label' },
+                { value: 'alias', label: 'Fixed alias' },
+              ]}
+              onSelect={mode => act.setDraft({ mode: mode === 'alias' ? 'alias' : 'label' })}
+            />
+          )}
+          {draft.kind === 'pattern' || draft.mode === 'label' ? (
             <Select
               key="draft-label"
               label="Label"
@@ -481,7 +578,7 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
               onSubmit={alias => act.saveDraft({ alias })}
             />
           )}
-          {draft.mode === 'label' && draft.customLabel ? (
+          {(draft.kind === 'pattern' || draft.mode === 'label') && draft.customLabel ? (
             <Input
               key="draft-custom-label"
               label="Custom label"
@@ -492,7 +589,51 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
               onSubmit={label => act.saveDraft({ label })}
             />
           ) : null}
-          <Text dimColor>The model sees: {draftPreview(draft, data.example)}</Text>
+          <Select
+            key="draft-case"
+            label="Ignore case"
+            value={draft.ignoreCase}
+            options={[
+              { value: 'default', label: `Follow the option (${data.caseDefault ? 'yes' : 'no'})` },
+              { value: 'yes', label: 'Yes' },
+              { value: 'no', label: 'No' },
+            ]}
+            onSelect={ignoreCase =>
+              act.setDraft({ ignoreCase: ignoreCase === 'yes' ? 'yes' : ignoreCase === 'no' ? 'no' : 'default' })
+            }
+          />
+          {draft.kind === 'pattern' ? (
+            <Select
+              key="draft-whole"
+              label="Whole word"
+              value={draft.wholeWord ? 'yes' : 'no'}
+              options={[
+                { value: 'yes', label: 'Yes: no letter or digit touching either end' },
+                { value: 'no', label: 'No: match inside longer text too' },
+              ]}
+              onSelect={whole => act.setDraft({ wholeWord: whole !== 'no' })}
+            />
+          ) : null}
+          {draft.kind === 'pattern' ? (
+            <Select
+              key="draft-group"
+              label="Mask"
+              value={String(draft.group)}
+              options={[
+                { value: '0', label: 'The whole match' },
+                { value: '1', label: 'Capture group 1 only' },
+                { value: '2', label: 'Capture group 2 only' },
+                { value: '3', label: 'Capture group 3 only' },
+              ]}
+              onSelect={group => act.setDraft({ group: Number(group) || 0 })}
+            />
+          ) : null}
+          <Text dimColor>
+            The model sees:{' '}
+            {draft.kind === 'pattern'
+              ? patternPreview(draft, data.caseDefault, data.example)
+              : draftPreview(draft, data.example)}
+          </Text>
           <Box flexDirection="row" gap={1}>
             <Button key="draft-save" variant="primary" onPress={() => act.saveDraft()}>
               {draft.editing ? 'Save rule' : 'Add rule'}
@@ -526,7 +667,28 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
         ))}
       </Box>
       <Box flexDirection="column">
-        <Text bold>Plugin options ({data.optionRules.length}) · keychain, edit in /plugin</Text>
+        <Text bold>Saved patterns ({data.patterns.length}) · plugin store, takes effect now</Text>
+        {data.patterns.length === 0 ? <Text dimColor>None yet. Pick Pattern as the rule type to add one.</Text> : null}
+        {data.patterns.map((pattern, index) => (
+          <Box key={`pattern-${index}`} flexDirection="row" gap={1} flexWrap="wrap">
+            <Text>/{pattern.pattern}/</Text>
+            <Text dimColor>
+              {pattern.label ?? CUSTOM_LABEL}
+              {pattern.ignoreCase ? ' · ignore case' : ''}
+              {pattern.wholeWord ? ' · whole word' : ''}
+              {pattern.group ? ` · group ${pattern.group}` : ''} · {pattern.source}
+            </Text>
+            <Button key={`remove-pattern-${index}`} onPress={() => act.removePattern(pattern)}>
+              Remove
+            </Button>
+          </Box>
+        ))}
+      </Box>
+      <Box flexDirection="column">
+        <Text bold>
+          Plugin options ({data.optionRules.length}
+          {data.optionPatterns ? ` values, ${data.optionPatterns} patterns` : ''}) · keychain, edit in /plugin
+        </Text>
         {data.optionRules.map((rule, index) => (
           <Box key={`option-${index}`} flexDirection="row" gap={1}>
             <Text>{shown(rule.value)}</Text>

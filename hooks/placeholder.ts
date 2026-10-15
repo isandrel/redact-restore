@@ -118,6 +118,8 @@ export interface ValueRule {
   readonly value: string;
   readonly label?: string;
   readonly alias?: string;
+  /** Match regardless of case; absent follows the `custom_case_insensitive` option. */
+  readonly ignoreCase?: boolean;
 }
 
 /**

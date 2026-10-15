@@ -37,6 +37,18 @@ export type RedactRestoreRule = {
   readonly value: string;
   readonly label?: string;
   readonly alias?: string;
+  readonly ignoreCase?: boolean;
+  readonly source: 'manual' | 'scan' | 'import';
+  readonly addedAt: string;
+};
+
+/** A pattern rule kept in the plugin store: a regex source and its flags, never an example or a match. */
+export type RedactRestorePattern = {
+  readonly pattern: string;
+  readonly label?: string;
+  readonly ignoreCase: boolean;
+  readonly wholeWord: boolean;
+  readonly group: number;
   readonly source: 'manual' | 'scan' | 'import';
   readonly addedAt: string;
 };
@@ -58,6 +70,13 @@ export type RedactRestoreScan = {
 };
 
 export type RedactRestoreDraft = {
+  readonly kind: 'value' | 'pattern';
+  readonly ignoreCase: 'default' | 'yes' | 'no';
+  readonly pattern: string;
+  readonly wholeWord: boolean;
+  readonly group: number;
+  /** A sample a pattern must match (an original): checked on save, never stored. */
+  readonly example: string;
   readonly value: string;
   readonly mode: 'label' | 'alias';
   readonly label: string;
@@ -88,6 +107,7 @@ declare module 'claude-code' {
       vault: Record<string, string>;
       metrics: RedactRestoreMetrics;
       rules: readonly RedactRestoreRule[];
+      patterns: readonly RedactRestorePattern[];
       scan: RedactRestoreScan | null;
       pane: RedactRestorePane;
     };

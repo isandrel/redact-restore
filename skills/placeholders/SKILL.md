@@ -19,6 +19,8 @@ Every rule is a set of fields in the rules pane (`/redact-restore rules`), never
 
 Values in the plugin options (keychain) always use the `CUSTOM` label.
 
+For a format rather than one value (an internal token such as `ACME-0000AAAA1111BBBB`), the user can pick **Pattern** as the rule type: a regular expression, an example it must match, a label, ignore case, whole word, and whether to mask the whole match or one capture group. The form previews the example as the model would see it and refuses patterns that could run slowly. Help them write the regex if asked, using made-up examples only.
+
 - A label is a letter, then letters, digits or `_`, up to 32 characters. It is upper-cased.
 - An alias is restored wherever it appears as a whole word, so it must not look like ordinary text. It needs at least 4 characters, no spaces, and an underscore, a digit or two capitals. It must not overlap the value or any other rule's value, saved or in the plugin options, and two values cannot share one alias. The pane and imports refuse such an alias.
 - The pane's Label list is the built-in labels, or the `rule_labels` option (for example `CUSTOMER, VENDOR, TEAM`), plus every label a rule already uses. **Other label…** takes any valid label.

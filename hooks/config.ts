@@ -1,4 +1,5 @@
 import { normalizeCustomValues, type MatchingOptions } from './matcher.ts';
+import { patternDetector, patternProblem, type PatternRule } from './patterns.ts';
 import { DEFAULT_POLICY, RESTORE_MODES, parsePatternList, type RestoreMode, type RestorePolicy } from './policy.ts';
 import { STATUS_LINES, type StatusLine } from './status.ts';
 import { selectDetectors } from './detectors.ts';
@@ -20,6 +21,9 @@ export interface RedactRestoreConfig {
   readonly matching: MatchingOptions;
   /** Count of configured custom values ignored as too short; never the values. */
   readonly ignoredShortValues: number;
+  /** Patterns from `custom_patterns` that passed the checks, and how many did not (never which). */
+  readonly optionPatterns: readonly PatternRule[];
+  readonly invalidPatterns: number;
   /** Detector ids active this session (for the model note and status). */
   readonly detectorIds: readonly string[];
   /** Names in enable_detectors / disable_detectors that match no detector or group. */
@@ -82,6 +86,13 @@ function ruleLabels(value: RawOptions[string] | undefined): readonly string[] {
 /** Defaults mirror plugin.json and lean to the safe side when a value is missing. */
 export function parseConfig(options: RawOptions): RedactRestoreConfig {
   const custom = normalizeCustomValues(stringList(options.custom_values));
+  const caseInsensitive = flag(options, 'custom_case_insensitive', false);
+  // Each custom_patterns entry is one regex source, used whole: nothing in it is parsed.
+  const patternEntries = stringList(options.custom_patterns)
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .map((pattern): PatternRule => ({ pattern, ignoreCase: caseInsensitive, wholeWord: true, group: 0 }));
+  const optionPatterns = patternEntries.filter(rule => patternProblem(rule) === undefined);
   const format =
     typeof options.placeholder_format === 'string' && options.placeholder_format.trim()
       ? options.placeholder_format.trim()
@@ -97,15 +108,20 @@ export function parseConfig(options: RawOptions): RedactRestoreConfig {
     enabled: flag(options, 'enabled', true),
     matching: {
       customValues: custom.values,
-      customCaseInsensitive: flag(options, 'custom_case_insensitive', false),
+      customCaseInsensitive: caseInsensitive,
       redactEmails: flag(options, 'redact_emails', true),
       placeholders,
       rules: custom.rules,
-      detectors: selection.detectors,
+      detectors: [
+        ...optionPatterns.map((rule, index) => patternDetector(rule, `option_pattern_${index}`)),
+        ...selection.detectors,
+      ],
     },
     detectorIds: selection.detectors.map(detector => detector.id),
     unknownDetectors: selection.unknown,
     ignoredShortValues: custom.tooShort,
+    optionPatterns,
+    invalidPatterns: patternEntries.length - optionPatterns.length,
     formatProblem: formatProblem(format),
     placeholders,
     restoreDisplay: flag(options, 'restore_display', true),

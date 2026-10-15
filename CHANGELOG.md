@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pattern rules: mask every match of your own regular expression, from the rules form (pattern, example it must match, label, ignore case, whole word, mask the whole match or one group) or the `custom_patterns` option. Patterns are checked before they are saved (no backreferences or nested repetition, a timed run on adversarial input) because JavaScript cannot time out a regex. They are exported and imported as fields.
+- Exact values can ignore case on their own, overriding `custom_case_insensitive` either way.
 - New default-on detectors: `internal_host` (`*.internal`, `*.corp`, `*.lan`, `*.local`, …), `ipv6` and `mac_address`. Turn any of them off with `disable_detectors`.
 - The model note now spells out how to use placeholders: copy them exactly, never split or invent one, keep them where the value belongs instead of a mock or `localhost`, and do the task as usual.
 - Test tab: `/redact-restore test` opens a tab in the pane where you paste text and see what the model would receive, and which values were found, before you send it. It runs on your machine and records nothing.

@@ -26,6 +26,13 @@
       "multiple": true,
       "sensitive": true
     },
+    "custom_patterns": {
+      "type": "string",
+      "title": "Private patterns",
+      "description": "Regular expressions for private values, one per entry, stored like Exact private values. Each entry is one JavaScript regex source without slashes or flags, used whole (nothing in it is parsed), matched as a whole word and masked as {{PRIVATE:CUSTOM#<id>}}; Ignore capitalization applies. Entries that are invalid or could match slowly are skipped. For a label, part-only masking or a test example, use /redact-restore rules.",
+      "sensitive": true,
+      "multiple": true
+    },
     "custom_case_insensitive": {
       "type": "boolean",
       "title": "Ignore capitalization in custom matches",

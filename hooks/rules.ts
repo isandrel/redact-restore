@@ -8,13 +8,15 @@ import {
   EXPORT_VERSION,
   IGNORED_PREFIX,
   MIN_CUSTOM_VALUE_LENGTH,
+  PATTERN_PREFIX,
   PREVIEW_DOTS,
   RULE_PREFIX,
 } from './defaults.ts';
 import { aliasOverlaps } from './matcher.ts';
-import { isUsableAlias, LABEL_PATTERN, type ValueRule } from './placeholder.ts';
+import { patternKey, patternProblem, type PatternProblem, type PatternRule } from './patterns.ts';
+import { CUSTOM_LABEL, isUsableAlias, LABEL_PATTERN, type ValueRule } from './placeholder.ts';
 
-export { EXPORT_FORMAT, EXPORT_VERSION, IGNORED_PREFIX, RULE_PREFIX };
+export { EXPORT_FORMAT, EXPORT_VERSION, IGNORED_PREFIX, PATTERN_PREFIX, RULE_PREFIX };
 
 export const RULE_SOURCES = ['manual', 'scan', 'import'] as const;
 export type RuleSource = (typeof RULE_SOURCES)[number];
@@ -23,8 +25,16 @@ export interface StoredRule {
   readonly value: string;
   readonly label?: string;
   readonly alias?: string;
+  /** Match regardless of case; absent follows the `custom_case_insensitive` option. */
+  readonly ignoreCase?: boolean;
   readonly source: RuleSource;
   /** ISO time the rule was first added; it orders the list. */
+  readonly addedAt: string;
+}
+
+/** A pattern rule kept in the plugin store. Its example is checked on save and never stored. */
+export interface StoredPattern extends Omit<PatternRule, 'example'> {
+  readonly source: RuleSource;
   readonly addedAt: string;
 }
 
@@ -81,6 +91,7 @@ export function makeRule(
     rule: {
       value,
       ...(alias ? { alias } : label ? { label } : {}),
+      ...(input.ignoreCase !== undefined ? { ignoreCase: input.ignoreCase } : {}),
       source,
       addedAt: now.toISOString(),
     },
@@ -118,7 +129,93 @@ function valueRuleOf(item: Record<string, unknown>): ValueRule | undefined {
     value: item.value,
     ...(typeof item.label === 'string' ? { label: item.label } : {}),
     ...(typeof item.alias === 'string' ? { alias: item.alias } : {}),
+    ...(typeof item.ignoreCase === 'boolean' ? { ignoreCase: item.ignoreCase } : {}),
   };
+}
+
+function patternRuleOf(item: Record<string, unknown>): PatternRule | undefined {
+  if (typeof item.pattern !== 'string') return undefined;
+  return {
+    pattern: item.pattern,
+    ...(typeof item.label === 'string' ? { label: item.label.toUpperCase() } : {}),
+    ignoreCase: item.ignoreCase === true,
+    wholeWord: item.wholeWord !== false,
+    group: typeof item.group === 'number' && Number.isInteger(item.group) ? item.group : 0,
+  };
+}
+
+// Checking a pattern runs probes; remember results so loading the store on every prompt stays cheap.
+const checked = new Map<string, PatternProblem | 'ok'>();
+function checkOnce(rule: PatternRule): PatternProblem | undefined {
+  const key = `${patternKey(rule)}\u0002${rule.label ?? ''}`;
+  let result = checked.get(key);
+  if (result === undefined) {
+    result = patternProblem({ ...rule, example: undefined }) ?? 'ok';
+    if (checked.size > 1000) checked.clear();
+    checked.set(key, result);
+  }
+  return result === 'ok' ? undefined : result;
+}
+
+/** A pattern rule from the form or an import, checked; the example (if any) must match. */
+export function makePattern(
+  input: PatternRule,
+  source: RuleSource,
+  now: Date,
+): { pattern: StoredPattern } | { problem: PatternProblem } {
+  const rule: PatternRule = {
+    ...input,
+    pattern: input.pattern.trim(),
+    ...(input.label ? { label: input.label.trim().toUpperCase() } : {}),
+  };
+  const problem = input.example !== undefined ? patternProblem(rule) : checkOnce(rule);
+  if (problem) return { problem };
+  const { example: _example, ...kept } = rule;
+  return {
+    pattern: {
+      ...kept,
+      ...(kept.label === CUSTOM_LABEL ? { label: undefined } : {}),
+      source,
+      addedAt: now.toISOString(),
+    },
+  };
+}
+
+/** Reads stored pattern rules, dropping any that are malformed or fail the checks. */
+export function parseStoredPatterns(raw: unknown): StoredPattern[] {
+  if (!Array.isArray(raw)) return [];
+  const patterns: StoredPattern[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const rule = patternRuleOf(item);
+    if (!rule || checkOnce(rule)) continue;
+    if (patterns.some(one => patternKey(one) === patternKey(rule))) continue;
+    patterns.push({
+      ...rule,
+      source: RULE_SOURCES.find(one => one === item.source) ?? 'manual',
+      addedAt: typeof item.addedAt === 'string' ? item.addedAt : new Date(0).toISOString(),
+    });
+  }
+  return patterns.sort((a, b) => a.addedAt.localeCompare(b.addedAt) || a.pattern.localeCompare(b.pattern));
+}
+
+/** Adds a pattern, or updates the label of the one with the same source and flags (keeping its place). */
+export function upsertPattern(
+  list: readonly StoredPattern[],
+  pattern: StoredPattern,
+): { patterns: StoredPattern[]; change: 'added' | 'updated' | 'unchanged' } {
+  const index = list.findIndex(one => patternKey(one) === patternKey(pattern));
+  if (index === -1) return { patterns: [...list, pattern], change: 'added' };
+  const current = list[index] as StoredPattern;
+  if ((current.label ?? CUSTOM_LABEL) === (pattern.label ?? CUSTOM_LABEL))
+    return { patterns: [...list], change: 'unchanged' };
+  const updated = { ...pattern, addedAt: current.addedAt };
+  return { patterns: list.map((one, i) => (i === index ? updated : one)), change: 'updated' };
+}
+
+/** Identity of a pattern list, for change detection and caches. */
+export function patternsKey(list: readonly StoredPattern[]): string {
+  return JSON.stringify(list.map(one => [patternKey(one), one.label ?? '']));
 }
 
 /** Reads the stored list, dropping anything malformed (the store is a local file a person may edit). */
@@ -145,7 +242,12 @@ export function upsertRule(
   const index = rules.findIndex(one => ruleKey(one.value) === key);
   if (index === -1) return { rules: [...rules, rule], change: 'added' };
   const current = rules[index] as StoredRule;
-  if (current.value === rule.value && current.label === rule.label && current.alias === rule.alias)
+  if (
+    current.value === rule.value &&
+    current.label === rule.label &&
+    current.alias === rule.alias &&
+    current.ignoreCase === rule.ignoreCase
+  )
     return { rules: [...rules], change: 'unchanged' };
   // An update keeps the rule's place: its added time stays.
   const updated = { ...rule, addedAt: current.addedAt };
@@ -172,7 +274,7 @@ export function maskPreview(value: string): string {
 }
 
 /** The export file: originals in plain text, so the caller warns where it is written. */
-export function exportRules(rules: readonly StoredRule[], now: Date): string {
+export function exportRules(rules: readonly StoredRule[], now: Date, patterns: readonly StoredPattern[] = []): string {
   return `${JSON.stringify(
     {
       format: EXPORT_FORMAT,
@@ -182,6 +284,14 @@ export function exportRules(rules: readonly StoredRule[], now: Date): string {
         value: rule.value,
         ...(rule.label ? { label: rule.label } : {}),
         ...(rule.alias ? { alias: rule.alias } : {}),
+        ...(rule.ignoreCase !== undefined ? { ignoreCase: rule.ignoreCase } : {}),
+      })),
+      patterns: patterns.map(one => ({
+        pattern: one.pattern,
+        ...(one.label ? { label: one.label } : {}),
+        ignoreCase: one.ignoreCase,
+        wholeWord: one.wholeWord,
+        group: one.group,
       })),
     },
     null,
@@ -190,7 +300,7 @@ export function exportRules(rules: readonly StoredRule[], now: Date): string {
 }
 
 /** An import file is an export: JSON whose rules have `value`, and optionally `label` or `alias`. */
-export function parseImport(text: string): { items: ValueRule[] } | { error: string } {
+export function parseImport(text: string): { items: ValueRule[]; patterns: PatternRule[] } | { error: string } {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -204,7 +314,41 @@ export function parseImport(text: string): { items: ValueRule[] } | { error: str
     return { error: 'The file comes from a newer Redact Restore version.' };
   }
   // An entry without a string value is kept as an empty value, so it counts as invalid.
-  return { items: data.rules.map(item => (isRecord(item) ? (valueRuleOf(item) ?? { value: '' }) : { value: '' })) };
+  const patterns = Array.isArray(data.patterns) ? data.patterns : [];
+  return {
+    items: data.rules.map(item => (isRecord(item) ? (valueRuleOf(item) ?? { value: '' }) : { value: '' })),
+    // A pattern entry without a string pattern is kept empty, so it counts as invalid.
+    patterns: patterns.map(item => (isRecord(item) ? (patternRuleOf(item) ?? EMPTY_PATTERN) : EMPTY_PATTERN)),
+  };
+}
+
+const EMPTY_PATTERN: PatternRule = { pattern: '', ignoreCase: false, wholeWord: true, group: 0 };
+
+/** Merges imported pattern rules into the stored ones, or replaces them all. */
+export function applyPatternImport(
+  existing: readonly StoredPattern[],
+  items: readonly PatternRule[],
+  mode: 'merge' | 'replace',
+  now: Date,
+): { patterns: StoredPattern[]; added: number; updated: number; unchanged: number; invalid: number } {
+  let patterns: StoredPattern[] = mode === 'replace' ? [] : [...existing];
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+  let invalid = 0;
+  for (const item of items) {
+    const made = makePattern(item, 'import', now);
+    if (!('pattern' in made)) {
+      invalid += 1;
+      continue;
+    }
+    const result = upsertPattern(patterns, made.pattern);
+    patterns = result.patterns;
+    if (result.change === 'added') added += 1;
+    else if (result.change === 'updated') updated += 1;
+    else unchanged += 1;
+  }
+  return { patterns, added, updated, unchanged, invalid };
 }
 
 export interface ImportSummary {
@@ -255,6 +399,10 @@ export async function storeKeyFor(prefix: string, value: string): Promise<string
   return `${prefix}${await fingerprint(value)}`;
 }
 
+export function isPatternKey(key: string): boolean {
+  return key.startsWith(PATTERN_PREFIX) && /^[a-f0-9]{64}$/.test(key.slice(PATTERN_PREFIX.length));
+}
+
 export function isRuleKey(key: string): boolean {
   return key.startsWith(RULE_PREFIX) && /^[a-f0-9]{64}$/.test(key.slice(RULE_PREFIX.length));
 }
@@ -266,7 +414,9 @@ export function sortRules(rules: readonly StoredRule[]): StoredRule[] {
 
 /** Identity of a rule list, for change detection and caches. */
 export function rulesKey(rules: readonly StoredRule[]): string {
-  return JSON.stringify(rules.map(rule => [rule.value, rule.label ?? '', rule.alias ?? '', rule.source]));
+  return JSON.stringify(
+    rules.map(rule => [rule.value, rule.label ?? '', rule.alias ?? '', rule.ignoreCase ?? '', rule.source]),
+  );
 }
 
 /** `~/…` for a path under home, so command output never spells the home folder (any case or separator). */

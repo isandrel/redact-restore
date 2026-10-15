@@ -21,6 +21,7 @@ You only ever see placeholders. Deciding what is private happens on the user's m
    - **Private value**: for example `Acme Corp`.
    - **Replace with**: a placeholder with a label (pick one such as `CUSTOMER`, or **Other label…**), or a fixed alias such as `CLIENT_A`.
    - The form shows what the model will see; **Add rule** saves it. **Edit** on a saved rule changes its label or alias.
+   - For a format such as an internal token, pick **Pattern** as the rule type and give a regular expression plus a made-up example it must match.
 3. **Choose where the most sensitive values live:**
    - Pane rules are kept in the plugin store on this computer (a local JSON file), take effect at once, and can be exported.
    - Values entered in `/plugin` → Installed → redact-restore → Configure options → Exact private values go to the system keychain. They need a new session and are never exported.

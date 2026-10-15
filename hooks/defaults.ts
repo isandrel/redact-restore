@@ -14,6 +14,17 @@ export const LITERAL_CACHE_LIMIT = 16;
 /** Nesting depth walked when restoring tool input. */
 export const MAX_INPUT_DEPTH = 32;
 
+/** Pattern rules: checked when saved, bounded when run (JavaScript has no regex timeout). */
+export const PATTERN_LIMITS = {
+  maxLength: 512,
+  /** A probe run over adversarial input may take at most this long. */
+  budgetMs: 50,
+  /** Probe input sizes, growing so an exponential pattern fails early instead of hanging. */
+  probeLengths: [4, 8, 12, 16, 20, 24, 28, 100, 400, 2000] as readonly number[],
+  /** Matches one pattern may report per text. */
+  maxMatches: 1000,
+} as const;
+
 // Placeholders
 export const DEFAULT_FORMAT = '{{PRIVATE:{label}#{id}}}';
 export const DEFAULT_ID_LENGTH = 12;
@@ -61,6 +72,7 @@ export const KEYWORD_RESCAN_LIMIT = 65_536;
 /** One store key per rule or dismissed candidate, suffixed with the value's SHA-256. */
 export const RULE_PREFIX = 'rule.';
 export const IGNORED_PREFIX = 'ignored.';
+export const PATTERN_PREFIX = 'pattern.';
 export const EXPORT_FORMAT = 'redact-restore-rules';
 export const EXPORT_VERSION = 1;
 export const EXPORT_FILE = 'redact-restore-rules.json';

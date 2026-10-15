@@ -447,6 +447,77 @@ describe('import and export', () => {
   });
 });
 
+describe('pattern rules in the pane', () => {
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`a pattern added on ${surface} masks every match, and Remove takes it out`, async ($, on) => {
+      const seen = world(on);
+      await run($, 'rules');
+      const pane = await mountPane($, surface);
+      await pane.select({ key: 'draft-kind', value: 'pattern' });
+      await pane.input({ key: 'draft-pattern', text: 'ACME-[A-Z0-9]{16}', kind: 'change' });
+      await pane.select({ key: 'draft-label', value: 'SECRET' });
+      await pane.input({ key: 'draft-example', text: 'id ACME-0000AAAA1111BBBB', kind: 'change' });
+      await eventually(async () => (await pane.find({ text: /The model sees: id \{\{PRIVATE:SECRET#/ })) !== undefined);
+      await pane.press({ key: 'draft-save' });
+      await eventually(async () => (await pane.find({ text: /Pattern added/ })) !== undefined);
+      expect(JSON.stringify(await pane.drawn())).not.toContain('0000AAAA1111BBBB');
+      await submit($, 'tokens ACME-ZZZZ9999YYYY8888 and ACME-QQQQ1111WWWW2222');
+      expect(seen.prompt).toMatch(
+        /^tokens \{\{PRIVATE:SECRET#[a-f0-9]{12}\}\} and \{\{PRIVATE:SECRET#[a-f0-9]{12}\}\}$/,
+      );
+      expect(await run($, 'status')).toMatch(/patterns: 1 saved/);
+      await pane.press({ key: 'remove-pattern-0' });
+      await eventually(async () => /patterns: 0 saved/.test(await run($, 'status')));
+    });
+  }
+
+  test('a risky pattern is refused with the reason, and nothing is saved', async ($, on) => {
+    world(on);
+    await run($, 'rules');
+    const pane = await mountPane($, 'desktop');
+    await pane.select({ key: 'draft-kind', value: 'pattern' });
+    await pane.input({ key: 'draft-pattern', text: '(a+)+b', kind: 'change' });
+    await pane.input({ key: 'draft-example', text: 'aaab' });
+    await eventually(async () => (await pane.find({ text: /holds another repetition/ })) !== undefined);
+    expect(await run($, 'status')).toMatch(/patterns: 0 saved/);
+  });
+
+  test('an exact value can ignore case on its own', async ($, on) => {
+    const seen = world(on);
+    await run($, 'rules');
+    const pane = await mountPane($, 'desktop');
+    await pane.select({ key: 'draft-case', value: 'yes' });
+    await pane.input({ key: 'draft-value', text: NAME });
+    await eventually(async () => /Rules: 1 saved/.test(await run($, 'status')));
+    expect(await masks($, seen, NAME.toUpperCase())).toBe(true);
+  });
+
+  test('patterns travel through export and import', async ($, on) => {
+    const seen = world(
+      on,
+      {},
+      {
+        '/tmp/p.json': JSON.stringify({
+          format: 'redact-restore-rules',
+          version: 1,
+          rules: [],
+          patterns: [{ pattern: 'ACME-\\d{4}', label: 'TOKEN' }, { pattern: '(a|aa)+' }],
+        }),
+      },
+    );
+    expect(await run($, 'import /tmp/p.json')).toMatch(
+      /Patterns: 1 added, 0 updated, 0 unchanged, 1 skipped as invalid; 1 saved now\./,
+    );
+    expect(await masks($, seen, 'ACME-1234')).toBe(true);
+    expect(seen.prompt).toMatch(/\{\{PRIVATE:TOKEN#/);
+    expect(await run($, 'export')).toMatch(/^Exported 0 saved rule\(s\) and 1 pattern\(s\) to /);
+    const file = seen.files.get(`${HOME}/.claude/redact-restore/redact-restore-rules.json`) ?? '';
+    expect(JSON.parse(file).patterns).toEqual([
+      { pattern: 'ACME-\\d{4}', label: 'TOKEN', ignoreCase: false, wholeWord: true, group: 0 },
+    ]);
+  });
+});
+
 describe('test tab', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`shows on ${surface} what the model would receive, and records nothing`, async ($, on) => {
@@ -526,7 +597,9 @@ describe('status', () => {
   test('counts only', async ($, on) => {
     world(on, {}, {});
     const text = await run($, 'status');
-    expect(text).toMatch(/Rules: 0 saved, 0 in plugin options; \d+ detectors\./);
+    expect(text).toMatch(
+      /Rules: 0 saved, 0 in plugin options; patterns: 0 saved, 0 in plugin options; \d+ detectors\./,
+    );
     expect(text).toMatch(/Restore mode: all/);
     expect(await run($, 'bogus')).toMatch(/^Usage: /);
   });

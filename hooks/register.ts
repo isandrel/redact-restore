@@ -16,6 +16,7 @@ import {
 import { normalizeRules, type MatchingOptions } from './matcher.ts';
 import {
   draftFrom,
+  draftPattern,
   draftProblem,
   drawPane,
   formLabels,
@@ -30,6 +31,7 @@ import {
 import type { ValueRule } from './placeholder.ts';
 import {
   applyImport,
+  applyPatternImport,
   describeProblem,
   displayPath,
   expandHome,
@@ -40,15 +42,23 @@ import {
   maskPreview,
   mergedRules,
   parseImport,
+  isPatternKey,
+  makePattern,
+  parseStoredPatterns,
   parseStoredRules,
+  PATTERN_PREFIX,
+  patternsKey,
   RULE_PREFIX,
   ruleKey,
   rulesKey,
   sortRules,
   storeKeyFor,
   upsertRule,
+  type StoredPattern,
   type StoredRule,
+  upsertPattern,
 } from './rules.ts';
+import { describePatternProblem, patternDetector, patternKey } from './patterns.ts';
 import {
   assignedValues,
   collectCandidates,
@@ -87,6 +97,7 @@ const metrics = atom({ plugin: 'redact-restore', key: 'metrics' }, emptyMetrics(
 // read one value; the store is read again on each prompt (other sessions edit
 // it, and /clear or /resume reset $.state without a new session.start).
 const rules = atom({ plugin: 'redact-restore', key: 'rules' }, [] as readonly StoredRule[]);
+const patterns = atom({ plugin: 'redact-restore', key: 'patterns' }, [] as readonly StoredPattern[]);
 const scanResult = atom({ plugin: 'redact-restore', key: 'scan' }, null as ScanView | null);
 const pane = atom({ plugin: 'redact-restore', key: 'pane' }, EMPTY_VIEW);
 
@@ -131,7 +142,9 @@ async function recordHookError($: EngineInterface, config: RedactRestoreConfig, 
 
 /** Settings Redact Restore had to ignore: short values, bad rules, unknown detectors, a bad format. */
 function configProblems(config: RedactRestoreConfig): number {
-  return config.ignoredShortValues + config.unknownDetectors.length + (config.formatProblem ? 1 : 0);
+  return (
+    config.ignoredShortValues + config.invalidPatterns + config.unknownDetectors.length + (config.formatProblem ? 1 : 0)
+  );
 }
 
 /**
@@ -204,21 +217,33 @@ const mergedCache = new WeakMap<RedactRestoreConfig, { key: string; options: Mat
 /** The last merged rules, for fallbacks after a reload (a superset is safe: it only masks more). */
 let lastMerged: MatchingOptions | undefined;
 
-function matchingFor(ctx: Context, stored: readonly StoredRule[]): MatchingOptions {
+function matchingFor(
+  ctx: Context,
+  stored: readonly StoredRule[],
+  storedPatterns: readonly StoredPattern[] = [],
+): MatchingOptions {
   const { matching } = ctx.config;
-  if (stored.length === 0) return matching;
-  const key = rulesKey(stored);
+  if (stored.length === 0 && storedPatterns.length === 0) return matching;
+  const key = `${rulesKey(stored)}\u0000${patternsKey(storedPatterns)}`;
   const cached = mergedCache.get(ctx.config);
   if (cached?.key === key) return cached.options;
   const normalized = normalizeRules(mergedRules(ctx.optionRules, stored));
-  const options = { ...matching, customValues: normalized.values, rules: normalized.rules };
+  const options = {
+    ...matching,
+    customValues: normalized.values,
+    rules: normalized.rules,
+    detectors: [
+      ...storedPatterns.map((rule, index) => patternDetector(rule, `pattern_${index}`)),
+      ...(matching.detectors ?? []),
+    ],
+  };
   mergedCache.set(ctx.config, { key, options });
   lastMerged = options;
   return options;
 }
 
 async function currentMatching($: EngineInterface, ctx: Context): Promise<MatchingOptions> {
-  return matchingFor(ctx, await read($, rules));
+  return matchingFor(ctx, await read($, rules), await read($, patterns));
 }
 
 /** For fallbacks, which may not call $: the last merged rules, a superset of the options. */
@@ -234,10 +259,17 @@ function fallbackMatching(ctx: Context): MatchingOptions {
 async function loadRules($: EngineInterface, strict = false): Promise<readonly StoredRule[]> {
   const current = await read($, rules);
   let stored: StoredRule[];
+  let storedPatterns: StoredPattern[];
   try {
-    const keys = (await $.store.keys()).filter(isRuleKey);
-    const raw = await Promise.all(keys.map(key => $.store.get(key)));
-    stored = sortRules(parseStoredRules(raw));
+    const keys = await $.store.keys();
+    const ruleKeys = keys.filter(isRuleKey);
+    const patternKeys = keys.filter(isPatternKey);
+    const [rawRules, rawPatterns] = await Promise.all([
+      Promise.all(ruleKeys.map(key => $.store.get(key))),
+      Promise.all(patternKeys.map(key => $.store.get(key))),
+    ]);
+    stored = sortRules(parseStoredRules(rawRules));
+    storedPatterns = parseStoredPatterns(rawPatterns);
   } catch (error) {
     // Prompts must not go out without the saved rules (prompt.submit is strict);
     // the pane and commands work on the session's copy.
@@ -245,7 +277,20 @@ async function loadRules($: EngineInterface, strict = false): Promise<readonly S
     return current;
   }
   if (rulesKey(stored) !== rulesKey(current)) await update($, rules, () => stored);
+  if (patternsKey(storedPatterns) !== patternsKey(await read($, patterns))) {
+    await update($, patterns, () => storedPatterns);
+  }
   return stored;
+}
+
+async function putPattern($: EngineInterface, pattern: StoredPattern): Promise<void> {
+  await $.store.set(await storeKeyFor(PATTERN_PREFIX, patternKey(pattern)), pattern);
+}
+
+async function deletePattern($: EngineInterface, pattern: StoredPattern): Promise<void> {
+  await $.store.delete(await storeKeyFor(PATTERN_PREFIX, patternKey(pattern)));
+  await loadRules($);
+  await setNotice($, 'Pattern removed. This session keeps masking what it already masked until /clear.');
 }
 
 /** The rule as the list now holds it (an update keeps its added time). */
@@ -283,13 +328,18 @@ async function saveDraft($: EngineInterface, ctx: Context, patch: Partial<RuleDr
     await setNotice($, describeProblem(problem), { draft });
     return;
   }
+  if (draft.kind === 'pattern') {
+    await savePatternDraft($, ctx, draft);
+    return;
+  }
   const stored = await loadRules($);
   const value = draft.value.trim();
   const label = draft.label.trim().toUpperCase();
+  const ignoreCase = draft.ignoreCase === 'default' ? {} : { ignoreCase: draft.ignoreCase === 'yes' };
   const parsed = makeRule(
     draft.mode === 'alias'
-      ? { value, alias: draft.alias.trim() }
-      : { value, ...(label !== CUSTOM_LABEL ? { label } : {}) },
+      ? { value, alias: draft.alias.trim(), ...ignoreCase }
+      : { value, ...(label !== CUSTOM_LABEL ? { label } : {}), ...ignoreCase },
     'manual',
     new Date(),
     [...ctx.optionRules, ...stored],
@@ -305,6 +355,25 @@ async function saveDraft($: EngineInterface, ctx: Context, patch: Partial<RuleDr
     result.change === 'unchanged'
       ? `${maskPreview(parsed.rule.value)} is already saved like this.`
       : `${maskPreview(parsed.rule.value)} ${result.change}.${MESSAGES.alreadySent}`;
+  await setNotice($, notice, { draft: EMPTY_DRAFT });
+}
+
+/** Saves a pattern rule from the form: checked (example included) before it is stored. */
+async function savePatternDraft($: EngineInterface, ctx: Context, draft: RuleDraft): Promise<void> {
+  const made = makePattern(draftPattern(draft, ctx.config.matching.customCaseInsensitive), 'manual', new Date());
+  if (!('pattern' in made)) {
+    await setNotice($, describePatternProblem(made.problem), { draft });
+    return;
+  }
+  await loadRules($);
+  const result = upsertPattern(await read($, patterns), made.pattern);
+  const saved = result.patterns.find(one => patternKey(one) === patternKey(made.pattern)) ?? made.pattern;
+  if (result.change !== 'unchanged') await putPattern($, saved);
+  await loadRules($);
+  const notice =
+    result.change === 'unchanged'
+      ? 'That pattern is already saved like this.'
+      : `Pattern ${result.change}.${MESSAGES.alreadySent}`;
   await setNotice($, notice, { draft: EMPTY_DRAFT });
 }
 
@@ -324,7 +393,7 @@ async function testText($: EngineInterface, ctx: Context, text: string): Promise
     await update($, pane, current => ({ ...current, test: undefined, notice: '' }));
     return;
   }
-  const matching = matchingFor(ctx, await loadRules($));
+  const matching = matchingFor(ctx, await loadRules($), await read($, patterns));
   const masked = maskText(text, matching, await read($, vault));
   const found = uniqueMatches(text, matching, await read($, vault));
   await update($, pane, current => ({ ...current, notice: '', test: { text, masked: masked.text, found } }));
@@ -373,7 +442,7 @@ async function scanNow($: EngineInterface, ctx: Context): Promise<ScanView> {
     ...(packageJson ? { packageJson } : {}),
   });
   const ignored = await ignoredFingerprints($);
-  const result = await triage(found, matchingFor(ctx, await loadRules($)), ignored);
+  const result = await triage(found, matchingFor(ctx, await loadRules($), await read($, patterns)), ignored);
   await update($, scanResult, () => result);
   return result;
 }
@@ -432,7 +501,7 @@ async function scanPath($: EngineInterface, ctx: Context, target: string): Promi
   const home = await homeDir($);
   const root = expandHome(target, home);
   const files = await readTextFiles($, ctx, root);
-  const matching = matchingFor(ctx, await loadRules($));
+  const matching = matchingFor(ctx, await loadRules($), await read($, patterns));
   const ignored = await ignoredFingerprints($);
   const envOn = ctx.config.detectorIds.includes('env_assignment');
   const assigned = assignedValues(files);
@@ -528,9 +597,11 @@ async function exportTo($: EngineInterface, target: string): Promise<string> {
   const home = await homeDir($);
   const path = target ? expandHome(target, home) : home ? `${home}/.claude/redact-restore/${EXPORT_FILE}` : EXPORT_FILE;
   const stored = await loadRules($);
-  await $.fs.write(path, exportRules(stored, new Date()));
+  const savedPatterns = await read($, patterns);
+  await $.fs.write(path, exportRules(stored, new Date(), savedPatterns));
+  const withPatterns = savedPatterns.length ? ` and ${savedPatterns.length} pattern(s)` : '';
   return (
-    `Exported ${stored.length} saved rule(s) to ${displayPath(path, home)}. Rules in the plugin options ` +
+    `Exported ${stored.length} saved rule(s)${withPatterns} to ${displayPath(path, home)}. Rules in the plugin options ` +
     '(keychain) are not exported. The file holds the original values in plain text: keep it out of ' +
     'version control and delete it after importing.'
   );
@@ -551,25 +622,43 @@ async function importFrom($: EngineInterface, ctx: Context, args: string): Promi
   const parsed = parseImport(text);
   if ('error' in parsed) return `Nothing imported: ${parsed.error}`;
   const before = await loadRules($, true);
-  const summary = applyImport(before, parsed.items, replace ? 'replace' : 'merge', new Date(), ctx.optionRules);
+  const beforePatterns = await read($, patterns);
+  const mode = replace ? 'replace' : 'merge';
+  const summary = applyImport(before, parsed.items, mode, new Date(), ctx.optionRules);
+  const patternSummary = applyPatternImport(beforePatterns, parsed.patterns, mode, new Date());
   // Replacing drops every saved rule: only from a file whose every entry is valid.
-  if (replace && (summary.invalid > 0 || summary.rules.length === 0)) {
+  const invalid = summary.invalid + patternSummary.invalid;
+  const valid = summary.rules.length + patternSummary.patterns.length;
+  if (replace && (invalid > 0 || valid === 0)) {
     return (
-      `Nothing imported: --replace needs a file whose entries are all valid (${summary.invalid} invalid, ` +
-      `${summary.rules.length} valid). Saved rules are unchanged.`
+      `Nothing imported: --replace needs a file whose entries are all valid (${invalid} invalid, ` +
+      `${valid} valid). Saved rules are unchanged.`
     );
   }
   // Write first, then remove: a failed write leaves the old rules in place.
   for (const rule of summary.rules) await putRule($, rule);
+  for (const pattern of patternSummary.patterns) await putPattern($, pattern);
   const keep = new Set(summary.rules.map(rule => ruleKey(rule.value)));
   for (const rule of before) {
     if (!keep.has(ruleKey(rule.value))) await $.store.delete(await storeKeyFor(RULE_PREFIX, rule.value));
   }
+  const keepPatterns = new Set(patternSummary.patterns.map(patternKey));
+  for (const pattern of beforePatterns) {
+    if (!keepPatterns.has(patternKey(pattern))) {
+      await $.store.delete(await storeKeyFor(PATTERN_PREFIX, patternKey(pattern)));
+    }
+  }
   const after = await loadRules($);
+  const patternNote =
+    parsed.patterns.length > 0 || replace
+      ? ` Patterns: ${patternSummary.added} added, ${patternSummary.updated} updated, ` +
+        `${patternSummary.unchanged} unchanged, ${patternSummary.invalid} skipped as invalid; ` +
+        `${(await read($, patterns)).length} saved now.`
+      : '';
   return (
     `Imported from ${displayPath(path, home)} (${replace ? 'replaced all saved rules' : 'merged'}): ` +
     `${summary.added} added, ${summary.updated} updated, ${summary.unchanged} unchanged, ` +
-    `${summary.invalid} skipped as invalid. ${after.length} saved rule(s) now.`
+    `${summary.invalid} skipped as invalid. ${after.length} saved rule(s) now.${patternNote}`
   );
 }
 
@@ -590,7 +679,9 @@ async function statusText($: EngineInterface, ctx: Context): Promise<string> {
   );
   return [
     `Redact Restore ${counters.version}${config.enabled ? '' : ' (disabled)'}`,
-    `Rules: ${stored.length} saved, ${ctx.optionRules.length} in plugin options; ${config.detectorIds.length} detectors.`,
+    `Rules: ${stored.length} saved, ${ctx.optionRules.length} in plugin options; patterns: ` +
+      `${(await read($, patterns)).length} saved, ${config.optionPatterns.length} in plugin options; ` +
+      `${config.detectorIds.length} detectors.`,
     `This session: ${formatStatus('detailed', '', stats) ?? 'nothing masked yet'}.`,
     `Replacements: ${stats.occurrences} (${stats.lastTurn} since the last prompt). Tool calls: ${stats.restored} restored, ` +
       `${stats.kept} kept on placeholders, ${stats.denied} denied. Requests: ${stats.audits} audited, ${stats.blocked} blocked.`,
@@ -653,6 +744,12 @@ export const register: Register = (on, options) => {
     if (config.enabled && config.ignoredShortValues > 0) {
       $.ui.toast(`Redact Restore ignored ${config.ignoredShortValues} custom value(s) shorter than 3 characters.`);
     }
+    if (config.enabled && config.invalidPatterns > 0) {
+      $.ui.toast(
+        `Redact Restore skipped ${config.invalidPatterns} private pattern(s) that are invalid or could match slowly; ` +
+          'check them in /redact-restore rules.',
+      );
+    }
     if (config.enabled && config.unknownDetectors.length > 0) {
       $.ui.toast(`Redact Restore: unknown detector name(s): ${config.unknownDetectors.join(', ')}.`);
     }
@@ -692,7 +789,7 @@ export const register: Register = (on, options) => {
       await recordHookError($, config, 'rules');
       return { drop: MESSAGES.rulesUnreadable };
     }
-    const masker = createMasker(matchingFor(ctx, stored), await read($, vault));
+    const masker = createMasker(matchingFor(ctx, stored, await read($, patterns)), await read($, vault));
     const text = masker.mask(e.text);
     const context = e.context?.map(item => masker.mask(item));
     await record(
@@ -901,7 +998,13 @@ export const register: Register = (on, options) => {
       // Fixed text only: an error message could carry a path or a value.
       return { text: MESSAGES.commandFailed };
     }
-  });
+  }).catch(() => ({ text: MESSAGES.commandFailed }));
+
+  // However the pane closes (Close, Esc, the surface's own control), drop what it held unsaved.
+  on('ui.close', { id: PANE_ID }, async ($, e, next) => {
+    await update($, pane, current => ({ ...current, draft: EMPTY_DRAFT, test: undefined, notice: '' }));
+    return next(e);
+  }).catch(($, e, next) => next(e));
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     const table = $.ui.resolve(e);
@@ -926,6 +1029,9 @@ export const register: Register = (on, options) => {
         canType: 'Input' in table && e.surface !== 'mobile',
         example: label => config.placeholders.example(label),
         labels,
+        patterns: await read($, patterns),
+        optionPatterns: config.optionPatterns.length,
+        caseDefault: matching.customCaseInsensitive,
       },
       {
         show: view => void update($, pane, current => ({ ...current, view, notice: '' })).catch(ignore),
@@ -938,6 +1044,7 @@ export const register: Register = (on, options) => {
             draft: draftFrom(rule, labels),
           }).catch(ignore),
         remove: value => void deleteRule($, value).catch(() => setNotice($, MESSAGES.saveFailed)),
+        removePattern: pattern => void deletePattern($, pattern).catch(() => setNotice($, MESSAGES.saveFailed)),
         scan: () => void rescan($, ctx).catch(() => setNotice($, MESSAGES.scanFailed)),
         accept: candidate => void acceptCandidates($, ctx, [candidate]).catch(() => setNotice($, MESSAGES.saveFailed)),
         acceptAll: () => void acceptAll($, ctx).catch(() => setNotice($, MESSAGES.saveFailed)),

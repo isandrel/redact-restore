@@ -206,9 +206,16 @@ export function findPrivateMatches(
   const candidates: PrivateMatch[] = [];
   const guarded = protectedRanges(text, options.placeholders ?? DEFAULT_SCHEME, knownTokens);
 
-  // Literal values are treated as literals, not as regexes.
-  const custom = literalPattern(options.customValues, options.customCaseInsensitive);
-  if (custom) {
+  // Literal values are treated as literals, not as regexes. A rule's own
+  // ignoreCase wins over the option, so the values form two alternations.
+  const insensitive = (value: string) =>
+    options.rules?.get(value.toLowerCase())?.ignoreCase ?? options.customCaseInsensitive;
+  for (const [values, ignoreCase] of [
+    [options.customValues.filter(value => !insensitive(value)), false],
+    [options.customValues.filter(insensitive), true],
+  ] as const) {
+    const custom = literalPattern(values, ignoreCase);
+    if (!custom) continue;
     for (const match of text.matchAll(custom)) {
       candidates.push({
         start: match.index,
