@@ -95,7 +95,7 @@ export const PREVIEW_DOTS = 4;
 export const SESSION_MAP_DIR = '.claude/redact-restore/sessions';
 export const SESSION_MAP_FORMAT = 'redact-restore-session';
 export const SESSION_MAP_VERSION = 1;
-/** Maps untouched for longer are deleted when a session starts (`session_map_days`). */
+/** Maps untouched for longer are deleted when a session starts (`session_map_days`; 0 keeps them all). */
 export const SESSION_MAP_DAYS = 30;
 export const SESSION_MAP_DAYS_CEILING = 3650;
 

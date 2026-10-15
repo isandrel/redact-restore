@@ -57,7 +57,10 @@ export interface RedactRestoreConfig {
   readonly statusFormat: string;
   /** Write per-session counts for a custom status-line script. */
   readonly statusFile: boolean;
-  /** Keep each session's placeholder map in a local file so `/resume` restores (`persist_session_map`). */
+  /**
+   * Keep each session's placeholder map in a local file so `/resume` restores
+   * (`persist_session_map`); delete files untouched for `days` (`session_map_days`, 0 = never).
+   */
   readonly sessionMap: { readonly persist: boolean; readonly days: number };
   /** Labels offered in the pane's rule form (`rule_labels`, or the built-in list). */
   readonly ruleLabels: readonly string[];
@@ -165,8 +168,9 @@ export function parseConfig(options: RawOptions, stableKey?: () => string | unde
     statusFile: flag(options, 'status_file', false),
     sessionMap: {
       persist: flag(options, 'persist_session_map', true),
+      // 0 keeps every file; a negative or missing value uses the default.
       days:
-        typeof options.session_map_days === 'number' && options.session_map_days > 0
+        typeof options.session_map_days === 'number' && options.session_map_days >= 0
           ? Math.min(Math.floor(options.session_map_days), SESSION_MAP_DAYS_CEILING)
           : SESSION_MAP_DAYS,
     },

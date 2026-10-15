@@ -394,6 +394,34 @@ describe('path scan', () => {
   );
 });
 
+describe('session map retention', () => {
+  const DIR = `${HOME}/.claude/redact-restore/sessions`;
+  const tree = {
+    [DIR]: [
+      { name: 'old-session.json', kind: 'file' as const, size: 10, mtimeMs: 0, isLink: false },
+      { name: 'new-session.json', kind: 'file' as const, size: 10, mtimeMs: Date.now(), isLink: false },
+    ],
+  };
+  const start = ($: Engine) => $.session.start({ cwd: HOME, surface: 'terminal', isInteractive: true });
+  const removed = (argv: string[][]) => argv.filter(args => args[0] === 'rm').flat();
+
+  test('files untouched for session_map_days are deleted when a session starts', async ($, on) => {
+    on('command.register', () => ({ value: undefined }) as never);
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    const seen = world(on, {}, {}, tree);
+    await start($);
+    expect(removed(seen.argv)).toEqual(['rm', '-f', '--', `${DIR}/old-session.json`]);
+  });
+
+  test('session_map_days 0 keeps every file', { options: { session_map_days: 0 } }, async ($, on) => {
+    on('command.register', () => ({ value: undefined }) as never);
+    on('session.start', ($, e) => ({ cwd: e.cwd }));
+    const seen = world(on, {}, {}, tree);
+    await start($);
+    expect(removed(seen.argv)).toEqual([]);
+  });
+});
+
 describe('import and export', () => {
   test('export writes the values to a file and reports only the path and count', async ($, on) => {
     const seen = world(on);

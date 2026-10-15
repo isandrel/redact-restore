@@ -1013,7 +1013,7 @@ export const register: Register = (on, options) => {
     }
     if (config.enabled) await record($, config, {}, (m, now) => ({ ...m, updatedAt: now }));
     else $.ui.status(undefined);
-    if (sessionMapSettings.persist) await pruneSessionMaps($).catch(ignore);
+    if (sessionMapSettings.persist && sessionMapSettings.days > 0) await pruneSessionMaps($).catch(ignore);
     if (config.enabled && config.ignoredShortValues > 0) {
       $.ui.toast(`Redact Restore ignored ${config.ignoredShortValues} custom value(s) shorter than 3 characters.`);
     }
