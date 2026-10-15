@@ -18,13 +18,13 @@ The output gives counts only, for example `3 added, 1 updated, 0 unchanged, 1 sk
 
 ## Accepted files
 
-Only a file written by `/redact-restore export` (see the `export` skill): JSON in which every rule is a set of fields, `value` and optionally `label` or `alias`. Nothing is parsed from text, so plain text files are refused.
+Only a file written by `/redact-restore export` (see the `export` skill): JSON in which every rule is a set of fields, `value` and optionally `label` or `alias`, `ignoreCase` and `description`. Nothing is parsed from text, so plain text files are refused.
 
 ```json
 {
   "format": "redact-restore-rules",
   "version": 1,
-  "rules": [{ "value": "Acme Corp", "label": "CUSTOMER" }, { "value": "Project Phoenix", "alias": "CODENAME_X" }]
+  "rules": [{ "value": "Acme Corp", "label": "CUSTOMER", "description": "client company name" }, { "value": "Project Phoenix", "alias": "CODENAME_X" }]
 }
 ```
 

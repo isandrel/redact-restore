@@ -28,7 +28,7 @@ The command output gives only the path and the number of rules. You never see th
   "format": "redact-restore-rules",
   "version": 1,
   "exportedAt": "2026-01-01T00:00:00.000Z",
-  "rules": [{ "value": "Acme Corp", "label": "CUSTOMER" }, { "value": "Project Phoenix", "alias": "CODENAME_X" }]
+  "rules": [{ "value": "Acme Corp", "label": "CUSTOMER", "description": "client company name" }, { "value": "Project Phoenix", "alias": "CODENAME_X" }]
 }
 ```
 

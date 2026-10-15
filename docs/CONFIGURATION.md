@@ -43,6 +43,24 @@ Every rule is a set of fields, never a string to parse. In the rules pane (`/red
 
 Values in the plugin options always use the `CUSTOM` label.
 
+## Descriptions
+
+A placeholder tells the model the kind of value through its label. Two more layers tell it what the value is, never the value itself:
+
+- **Label meanings.** The placeholder note in the system prompt says what common labels stand for (`HOST` is a private host name, `ENV` is the value of an environment variable, and so on). The list is `LABEL_DESCRIPTIONS` in `hooks/defaults.ts`. The note depends only on the options, so the prompt cache keeps hitting.
+- **Per-rule descriptions.** A saved value or pattern can carry a description, such as `client company name` or `production database host`, typed in the rules form (**Description for the model**) or set in an import file. A scan suggests one from where it found the value (`the user's own name (git config)`, `the value of DB_PASSWORD`).
+
+The first time a described placeholder appears, its description goes to the model once, as context attached to your next prompt that you do not see in the transcript:
+
+```text
+Redact Restore: what these placeholders stand for (the values stay on the user's machine; use the placeholders as they are):
+- {{PRIVATE:ORG#3fa1c09e8b2d}}: client company name
+```
+
+Added to the new message, never to the system prompt, the note leaves the cached prefix intact. At most 50 descriptions go with one prompt; the rest go with the next.
+
+Checks, all on your machine: a description is one line of up to 120 characters without `{` or `}`; it is refused when it contains its own value (or, for a pattern, when the pattern matches it); and it is masked before sending, so another private value inside it becomes a placeholder. A placeholder that first appears in a tool result mid-turn is described with your next prompt. After `/compact` the model may lose earlier descriptions; they are not sent again.
+
 A fixed alias is restored wherever it appears as a whole word, so it must look unlike ordinary text: at least 4 characters, no spaces, and an underscore, a digit, or two capitals. An alias must also not overlap any other rule's value (in the options or saved), and two values cannot share one. The pane and imports refuse such a rule; if one is found in the merged rules anyway, its alias is dropped and the value is still masked with the default label; an invalid `placeholder_format` falls back to the default with a toast explaining why. Placeholders minted in an earlier format still restore after you change it.
 
 ## Pattern rules
@@ -57,6 +75,7 @@ Pick **Pattern** as the rule type in `/redact-restore rules` to mask every match
 | Ignore case           | Follow `custom_case_insensitive`, or yes / no for this rule                               |
 | Whole word            | On by default: no letter or digit may touch either end of the match                       |
 | Mask                  | The whole match, or one capture group (`ticket=(\w+)` with group 1 masks only the ticket) |
+| Description           | Optional: what a match is (`internal ticket id`); see [Descriptions](#descriptions)       |
 
 Pattern rules rank with exact values, above the built-in detectors. JavaScript cannot time out a regex, so patterns use a safe subset, checked without running anything, and a pattern outside it is refused with the reason:
 
@@ -111,7 +130,7 @@ The trade-off: with `stable`, the model provider can tell that two sessions ment
 | `/redact-restore session`                   | Opens the pane's **Session** tab: this session's state, counts by kind, source and tool, audits, settings, and every placeholder made (values masked until **Show values**)                                                                                                                                                                                                                                                                                                                                                                           |
 | `/redact-restore status`                    | Rule counts, detectors, this session's counts and settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `/redact-restore export [file]`             | Writes the saved rules to `~/.claude/redact-restore/redact-restore-rules.json` or the given file. Plain text: keep it out of version control and delete it after importing                                                                                                                                                                                                                                                                                                                                                                            |
-| `/redact-restore import <file> [--replace]` | Merges an export file (JSON: `rules` with `value`, `label`, `alias`, `ignoreCase`, and `patterns` with `pattern`, `label`, `ignoreCase`, `wholeWord`, `group`; nothing is parsed from text) into the saved rules and patterns; `--replace` replaces the saved rules, and the saved patterns too when the file has a `patterns` list (an older export without one keeps them); it is refused unless every entry is valid                                                                                                                               |
+| `/redact-restore import <file> [--replace]` | Merges an export file (JSON: `rules` with `value`, `label`, `alias`, `ignoreCase`, `description`, and `patterns` with `pattern`, `label`, `ignoreCase`, `wholeWord`, `group`, `description`; nothing is parsed from text) into the saved rules and patterns; `--replace` replaces the saved rules, and the saved patterns too when the file has a `patterns` list (an older export without one keeps them); it is refused unless every entry is valid                                                                                                 |
 
 The command's output reaches the model, so it holds counts, labels and paths only. A value already in the conversation was sent before its rule existed: the pre-send audit then blocks the next request until you `/clear` or `/rewind`. A removed rule keeps masking in the current session (the session remembers what it has masked) until `/clear`.
 

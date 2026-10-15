@@ -530,6 +530,18 @@ describe('pattern rules in the pane', () => {
     expect(await run($, 'status')).toMatch(/patterns: 0 saved/);
   });
 
+  test('a description typed in the form is saved with the rule and shown in the list', async ($, on) => {
+    const seen = world(on);
+    await run($, 'rules');
+    const pane = await mountPane($, 'desktop');
+    await pane.input({ key: 'draft-description', text: 'client company name', kind: 'change' });
+    await pane.input({ key: 'draft-value', text: NAME });
+    await eventually(async () => /Rules: 1 saved/.test(await run($, 'status')));
+    await eventually(async () => (await pane.find({ text: /"client company name"/ })) !== undefined);
+    await run($, 'export /tmp/out.json');
+    expect(seen.files.get('/tmp/out.json')).toContain('"description": "client company name"');
+  });
+
   test('an exact value can ignore case on its own', async ($, on) => {
     const seen = world(on);
     await run($, 'rules');

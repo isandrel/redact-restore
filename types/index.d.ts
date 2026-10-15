@@ -38,6 +38,8 @@ export type RedactRestoreRule = {
   readonly label?: string;
   readonly alias?: string;
   readonly ignoreCase?: boolean;
+  /** What the value is, told to the model; never the value. */
+  readonly description?: string;
   readonly source: 'manual' | 'scan' | 'import';
   readonly addedAt: string;
 };
@@ -49,6 +51,7 @@ export type RedactRestorePattern = {
   readonly ignoreCase: boolean;
   readonly wholeWord: boolean;
   readonly group: number;
+  readonly description?: string;
   readonly source: 'manual' | 'scan' | 'import';
   readonly addedAt: string;
 };
@@ -81,6 +84,8 @@ export type RedactRestoreDraft = {
   readonly group: number;
   /** A sample a pattern must match (an original): checked on save, never stored. */
   readonly example: string;
+  /** What the value is, told to the model; never the value. */
+  readonly description: string;
   readonly value: string;
   readonly mode: 'label' | 'alias';
   readonly label: string;
@@ -114,6 +119,8 @@ declare module 'claude-code' {
       patterns: readonly RedactRestorePattern[];
       scan: RedactRestoreScan | null;
       pane: RedactRestorePane;
+      /** Placeholder descriptions (never values), and which the model has been told. */
+      legend: { readonly notes: Record<string, string>; readonly sent: Readonly<Record<string, true>> };
     };
   }
 }

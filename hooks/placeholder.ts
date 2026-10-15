@@ -15,6 +15,7 @@ import { hmacSha256Hex } from './hmac.ts';
 import {
   CUSTOM_LABEL,
   DEFAULT_FORMAT,
+  DESCRIPTION_LIMITS,
   DEFAULT_ID_LENGTH,
   EMAIL_LABEL,
   ID_KEY_BYTES,
@@ -153,6 +154,19 @@ export interface ValueRule {
   readonly alias?: string;
   /** Match regardless of case; absent follows the `custom_case_insensitive` option. */
   readonly ignoreCase?: boolean;
+  /** What the value is ("client company name"): told to the model, never the value. */
+  readonly description?: string;
+}
+
+/**
+ * Whether a description has the right shape: one line, printable, at most
+ * `DESCRIPTION_LIMITS.maxLength` characters, no braces (it must not look like a
+ * placeholder). Whether it holds its own value is checked by the rule's maker.
+ */
+export function isUsableDescription(description: string): boolean {
+  return (
+    description.length > 0 && description.length <= DESCRIPTION_LIMITS.maxLength && !/[\p{Cc}{}]/u.test(description)
+  );
 }
 
 /**

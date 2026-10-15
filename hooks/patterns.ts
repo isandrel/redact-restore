@@ -20,9 +20,10 @@ import {
   KEYWORD_WINDOW_BEFORE,
   MIN_CUSTOM_VALUE_LENGTH,
   PATTERN_LIMITS,
+  DESCRIPTION_HINT,
 } from './defaults.ts';
 import type { Detector, Span } from './detectors.ts';
-import { LABEL_PATTERN } from './placeholder.ts';
+import { LABEL_PATTERN, isUsableDescription } from './placeholder.ts';
 
 export interface PatternRule {
   /** The regex source, without slashes or flags. */
@@ -35,6 +36,8 @@ export interface PatternRule {
   readonly group: number;
   /** A sample that must match when the rule is saved; never sent anywhere. */
   readonly example?: string;
+  /** What a match is ("internal API token"): told to the model; must not match the pattern. */
+  readonly description?: string;
 }
 
 export type PatternProblem =
@@ -51,7 +54,9 @@ export type PatternProblem =
   | 'invalid-label'
   | 'no-example'
   | 'example-no-match'
-  | 'example-too-short';
+  | 'example-too-short'
+  | 'invalid-description'
+  | 'description-has-value';
 
 /** What the scanner learns about a source: a problem, or its keyword and capture groups. */
 interface Shape {
@@ -229,6 +234,12 @@ export function patternProblem(rule: PatternRule): PatternProblem | undefined {
   const shape = analyze(source);
   if (shape.problem) return shape.problem;
   if (rule.group < 0 || rule.group > shape.groups) return 'no-group';
+  if (rule.description !== undefined) {
+    if (!isUsableDescription(rule.description)) return 'invalid-description';
+    // The description goes to the model: it must not itself hold a value the rule masks.
+    if (findSpans(rule, compilePattern(rule), shape.keyword ?? '', rule.description).length > 0)
+      return 'description-has-value';
+  }
   if (rule.example === undefined) return undefined;
   if (!rule.example.trim()) return 'no-example';
   if (findSpans(rule, compilePattern(rule), shape.keyword ?? '', rule.example).length > 0) return undefined;
@@ -270,6 +281,10 @@ export function describePatternProblem(problem: PatternProblem): string {
       return 'The pattern does not match the example.';
     case 'example-too-short':
       return `The part the pattern masks in the example must be at least ${MIN_CUSTOM_VALUE_LENGTH} characters.`;
+    case 'invalid-description':
+      return DESCRIPTION_HINT;
+    case 'description-has-value':
+      return 'The description matches the pattern itself: describe what the value is without writing one.';
   }
 }
 
@@ -285,6 +300,7 @@ export function patternDetector(rule: PatternRule, id: string): Detector {
     defaultOn: true,
     // Same standing as exact values: a user's own rule beats the built-in detectors.
     rank: 0,
+    ...(rule.description ? { description: rule.description } : {}),
     find: text => (keyword ? findSpans(rule, regex, keyword, text) : []),
   };
 }

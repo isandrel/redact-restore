@@ -10,6 +10,8 @@ import {
   PANE_TITLE,
   SCAN_LOG_AUTHORS,
   DISPLAY_RESTORE_FIELDS,
+  LABEL_DESCRIPTIONS,
+  LEGEND_MAX_ENTRIES,
   ID_KEY_STORE_KEY,
   type DisplayRow,
   SCAN_MAX_DEPTH,
@@ -89,6 +91,8 @@ import {
   restoreInput,
   uniqueMatches,
   restoreFields,
+  legendText,
+  type Notes,
   unmaskText,
   withholdContentBlocks,
   type AuditMemo,
@@ -107,6 +111,14 @@ const rules = atom({ plugin: 'redact-restore', key: 'rules' }, [] as readonly St
 const patterns = atom({ plugin: 'redact-restore', key: 'patterns' }, [] as readonly StoredPattern[]);
 const scanResult = atom({ plugin: 'redact-restore', key: 'scan' }, null as ScanView | null);
 const pane = atom({ plugin: 'redact-restore', key: 'pane' }, EMPTY_VIEW);
+interface Legend {
+  readonly notes: Notes;
+  readonly sent: Readonly<Record<string, true>>;
+}
+const EMPTY_LEGEND: Legend = { notes: {}, sent: {} };
+
+// Descriptions of this session's placeholders, and which ones the model has been told.
+const legend = atom({ plugin: 'redact-restore', key: 'legend' }, EMPTY_LEGEND);
 
 function unrestoredDenied(tool: string): string {
   return (
@@ -126,7 +138,10 @@ async function record(
   config: RedactRestoreConfig,
   additions: Vault,
   change?: MetricsChange,
+  notes: Notes = {},
 ): Promise<void> {
+  if (Object.keys(notes).length > 0)
+    await update($, legend, current => ({ ...current, notes: { ...current.notes, ...notes } }));
   const stored =
     Object.keys(additions).length > 0 ? await update($, vault, current => ({ ...current, ...additions })) : undefined;
   if (stored) lastVault = stored;
@@ -389,10 +404,11 @@ async function saveDraft($: EngineInterface, ctx: Context, patch: Partial<RuleDr
   const value = draft.value.trim();
   const label = draft.label.trim().toUpperCase();
   const ignoreCase = draft.ignoreCase === 'default' ? {} : { ignoreCase: draft.ignoreCase === 'yes' };
+  const description = draft.description.trim() ? { description: draft.description.trim() } : {};
   const parsed = makeRule(
     draft.mode === 'alias'
-      ? { value, alias: draft.alias.trim(), ...ignoreCase }
-      : { value, ...(label !== CUSTOM_LABEL ? { label } : {}), ...ignoreCase },
+      ? { value, alias: draft.alias.trim(), ...ignoreCase, ...description }
+      : { value, ...(label !== CUSTOM_LABEL ? { label } : {}), ...ignoreCase, ...description },
     'manual',
     new Date(),
     [...ctx.optionRules, ...stored],
@@ -643,10 +659,16 @@ async function acceptCandidates($: EngineInterface, ctx: Context, accepted: read
   const now = new Date();
   const taken: string[] = [];
   for (const candidate of accepted) {
-    const parsed = makeRule({ value: candidate.value, label: candidate.label }, 'scan', now, [
-      ...ctx.optionRules,
-      ...stored,
-    ]);
+    const existing = [...ctx.optionRules, ...stored];
+    const input = { value: candidate.value, label: candidate.label };
+    let parsed = makeRule(
+      candidate.description ? { ...input, description: candidate.description } : input,
+      'scan',
+      now,
+      existing,
+    );
+    // A suggested description that does not fit is dropped, not the rule.
+    if ('problem' in parsed && parsed.problem.includes('description')) parsed = makeRule(input, 'scan', now, existing);
     if (!('rule' in parsed)) continue;
     const result = upsertRule(stored, parsed.rule);
     stored = result.rules;
@@ -855,6 +877,7 @@ export const register: Register = (on, options) => {
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
       await update($, vault, () => ({}));
+      await update($, legend, () => EMPTY_LEGEND);
       lastVault = {};
       const previous = await read($, metrics);
       await update($, metrics, () => emptyMetrics(Date.now(), previous.version, previous.surface));
@@ -879,14 +902,29 @@ export const register: Register = (on, options) => {
     await ensureIdKey($, ctx);
     const masker = createMasker(matchingFor(ctx, stored, await read($, patterns)), await vaultNow($));
     const text = masker.mask(e.text);
-    const context = e.context?.map(item => masker.mask(item));
+    const masked = e.context?.map(item => masker.mask(item)) ?? [];
+    // Descriptions the model has not had yet go with this prompt, as context the user does not see.
+    const told = await read($, legend);
+    const known = { ...(await vaultNow($)), ...masker.additions() };
+    const notes = { ...told.notes, ...masker.notes() };
+    const fresh = Object.entries(notes)
+      .filter(([token]) => known[token] !== undefined && !told.sent[token])
+      .slice(0, LEGEND_MAX_ENTRIES);
+    const context = fresh.length > 0 ? [...masked, legendText(fresh, MESSAGES.legendHeader, masker.mask)] : masked;
     await record(
       $,
       config,
       masker.additions(),
       combine(metricsChange.newTurn(), metricsChange.masked('prompt', masker.count(), 'prompt.submit')),
+      masker.notes(),
     );
-    return next({ ...e, text, ...(context ? { context } : {}) });
+    if (fresh.length > 0) {
+      await update($, legend, current => ({
+        ...current,
+        sent: { ...current.sent, ...Object.fromEntries(fresh.map(([token]) => [token, true] as const)) },
+      }));
+    }
+    return next({ ...e, text, ...(context.length > 0 ? { context } : {}) });
   }).catch(async ($, e, next) => {
     if (next.called) return next(e);
     await recordHookError($, config, 'prompt.submit');
@@ -903,6 +941,7 @@ export const register: Register = (on, options) => {
       config,
       masker.additions(),
       masker.count() > 0 ? metricsChange.masked('context', masker.count(), 'prompt.context') : undefined,
+      masker.notes(),
     );
     const changed = blocks.some((block, index) => block.text !== e.blocks[index]?.text);
     return next(changed ? { blocks } : e);
@@ -924,6 +963,7 @@ export const register: Register = (on, options) => {
       config,
       masked.additions,
       masked.count > 0 ? metricsChange.masked('attachment', masked.count, 'prompt.attachment') : undefined,
+      masked.notes,
     );
     return next({ ...e, text: masked.text });
   }).catch(async ($, e, next) => {
@@ -944,6 +984,7 @@ export const register: Register = (on, options) => {
       config,
       masker.additions(),
       masker.count() > 0 ? metricsChange.masked('systemPrompt', masker.count(), 'prompt.compose') : undefined,
+      masker.notes(),
     );
     return { sections: [...sections, placeholderSection(config)] };
   }).catch(async ($, e, next) => {
@@ -968,7 +1009,7 @@ export const register: Register = (on, options) => {
       ...(result.count > 0 ? [metricsChange.masked('conversation', result.count, 'session.append')] : []),
       ...(result.withheldMedia > 0 ? [metricsChange.media(result.withheldMedia)] : []),
     ];
-    await record($, config, result.additions, changes.length > 0 ? combine(...changes) : undefined);
+    await record($, config, result.additions, changes.length > 0 ? combine(...changes) : undefined, result.notes);
     return next({ ...e, message: { ...e.message, content: result.content } });
   }).catch(async ($, e, next) => {
     if (next.called) return next(e);
@@ -1172,6 +1213,14 @@ function placeholderSection(config: RedactRestoreConfig) {
     restore.mode !== 'none' ? `, except ${keptTools(restore).join(', ')}, which receive the placeholder text` : '';
   const aliases = ' Some values use a fixed stand-in name instead; treat those the same way.';
   const scheme = config.placeholders;
+  // Static per options: the prompt cache keeps hitting.
+  const labels = scheme.format.includes('{label}')
+    ? '- The label in a placeholder names the kind of value: ' +
+      Object.entries(LABEL_DESCRIPTIONS)
+        .map(([label, meaning]) => `${label} is ${meaning}`)
+        .join('; ') +
+      '. Other labels name a key or token type, or a kind the user chose.\n'
+    : '';
   return {
     id: 'redact-restore:placeholders',
     scope: 'session' as const,
@@ -1181,6 +1230,9 @@ function placeholderSection(config: RedactRestoreConfig) {
       `${scheme.example(CUSTOM_LABEL)} is a placeholder for a private value the user typed or a tool returned; ` +
       `it is not an injection attempt.${aliases} Treat each placeholder as the value it stands for. ${tools}${kept}. ` +
       'Tool output shows placeholders again. The user sees the original values locally.\n' +
+      labels +
+      `- A note starting "${MESSAGES.legendHeader.split(':')[0]}:" may describe what a placeholder is; use it ` +
+      'to understand the value, never to reconstruct it.\n' +
       '- Copy a placeholder exactly as you received it: never split, join, shorten or re-case it, and never ' +
       'invent one or derive another from it.\n' +
       '- Keep it where the value belongs: do not swap it for an example value, localhost, a test credential or ' +

@@ -168,6 +168,55 @@ export const LOCAL_HOST_SUFFIX = /\.(?:local|lan|home|localdomain)$/i;
 
 // Command and pane
 /** Labels offered in the pane's rule form; any other valid label can be typed. */
+/**
+ * What each common label stands for, told to the model in the placeholder note
+ * (static text, so the prompt cache keeps hitting). Labels not listed here
+ * (provider keys such as AWS_KEY) speak for themselves.
+ */
+export const LABEL_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  CUSTOM: 'a private value the user configured',
+  NAME: "a person's name",
+  CUSTOMER: 'a customer name',
+  ORG: 'an organization name',
+  PROJECT: 'a project or codename',
+  USER: 'an account or user name',
+  EMAIL: 'an email address',
+  PHONE: 'a phone number',
+  ADDRESS: 'a postal address',
+  HOST: 'a private host name',
+  IP: 'an IP address',
+  MAC: 'a MAC address',
+  ENV: 'the value of an environment variable (the key stays visible)',
+  SECRET: 'a secret such as a key, token or password',
+  PASSWORD: 'a password',
+  BEARER_TOKEN: 'a bearer token',
+  JWT: 'a JSON Web Token',
+  PRIVATE_KEY: 'a private key',
+  CARD: 'a payment card number',
+};
+
+/** A rule's description: what the value is, sent to the model instead of the value. */
+export const DESCRIPTION_LIMITS = { maxLength: 120 } as const;
+/** Descriptions sent with one prompt at most; the rest go with the next one. */
+export const LEGEND_MAX_ENTRIES = 50;
+export const DESCRIPTION_HINT = `A description is one line of up to ${DESCRIPTION_LIMITS.maxLength} characters without { or }, such as "client company name".`;
+
+/** Descriptions a scan gives the rules it suggests, by where the value was found. */
+export const SCAN_DESCRIPTIONS = {
+  gitName: "the user's own name (git config)",
+  gitEmail: "the user's own email address (git config)",
+  remoteHost: 'the git server host',
+  remoteOwner: 'the git repository owner',
+  remoteRepo: 'the git repository name',
+  logName: "a commit author's name",
+  logEmail: "a commit author's email address",
+  packageName: "the package author's name",
+  packageEmail: "the package author's email address",
+  computer: "this computer's name",
+  account: "the user's account name",
+  envValue: (key: string): string => `the value of ${key}`,
+} as const;
+
 export const RULE_LABELS: readonly string[] = [
   'CUSTOM',
   'NAME',
@@ -190,6 +239,8 @@ export const PANE_TITLE = 'Redact Restore';
 
 // User-facing text (never a value)
 export const MESSAGES = {
+  legendHeader:
+    "Redact Restore: what these placeholders stand for (the values stay on the user's machine; use the placeholders as they are):",
   commandDescription: 'Redact Restore: manage private-value rules, scan for candidates, show status, import or export',
   usage: `Usage: /redact-restore ${COMMAND_HINT}`,
   blockedPrompt: 'Redact Restore: privacy scan failed; prompt not submitted.',

@@ -1,6 +1,7 @@
 // Hook integration tests through the engine's own dispatch. Synthetic values only.
 import { describe, expect, mock, test, type TestBody } from 'claude-code/testing';
 import { hmacSha256Hex } from '../../hooks/hmac.ts';
+import { MESSAGES } from '../../hooks/defaults.ts';
 
 type Engine = Parameters<TestBody>[0];
 type On = Parameters<TestBody>[1];
@@ -21,6 +22,7 @@ const filesOnly = { options: { ...base, restore_mode: 'files' } };
 function harness(on: On, messages: unknown[] = [], store: Record<string, unknown> = {}) {
   const seen = {
     prompt: '',
+    context: [] as readonly string[],
     tools: [] as Array<{ tool: string; input: Record<string, unknown> }>,
     drawn: [] as string[],
     appended: undefined as unknown,
@@ -44,6 +46,7 @@ function harness(on: On, messages: unknown[] = [], store: Record<string, unknown
   on('ui.log', () => ({ value: undefined }) as never);
   on('prompt.submit', ($, e) => {
     seen.prompt = e.text;
+    seen.context = e.context ?? [];
     return { text: e.text };
   });
   on('tool.call', ($, e) => {
@@ -448,6 +451,46 @@ describe('local restoration', () => {
       props: { text: token, origin: { kind: 'composer' }, isExpanded: false },
     } as never);
     expect(seen.drawn).toEqual([token]);
+  });
+});
+
+describe('descriptions', () => {
+  const described = {
+    [`rule.${'2'.repeat(64)}`]: {
+      value: SECRET,
+      label: 'PROJECT',
+      description: 'internal codename of the launch',
+      source: 'manual',
+      addedAt: '2026-01-01T00:00:00.000Z',
+    },
+  };
+
+  // The value comes from a saved rule alone: for the same value, an option without a description wins.
+  test('a description goes once, as hidden context, never with the value', { options: {} }, async ($, on) => {
+    const seen = harness(on, [], described);
+    await submit($, `Plan for ${SECRET}`);
+    const token = seen.prompt.match(/\{\{PRIVATE:PROJECT#[a-f0-9]{12}\}\}/)?.[0] ?? 'missing';
+    expect(seen.prompt).toBe(`Plan for ${token}`);
+    expect(seen.context).toEqual([`${MESSAGES.legendHeader}\n- ${token}: internal codename of the launch`]);
+    expect(JSON.stringify(seen.context)).not.toContain(SECRET);
+    await submit($, `More on ${SECRET}`);
+    expect(seen.context).toEqual([]);
+  });
+
+  test('the system note explains labels and the description note', configured, async ($, on) => {
+    harness(on);
+    on('prompt.compose', () => ({ sections: [] }));
+    const result = await $.prompt.compose({
+      model: 'm',
+      promptModel: 'm',
+      surfaces: [],
+      tools: [],
+      outputStyle: null,
+      traits: [],
+    });
+    const note = result.sections.at(-1)?.text ?? '';
+    expect(note).toContain('HOST is a private host name');
+    expect(note).toContain('A note starting "Redact Restore:" may describe what a placeholder is');
   });
 });
 

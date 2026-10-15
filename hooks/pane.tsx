@@ -107,6 +107,8 @@ export interface RuleDraft {
   readonly group: number;
   /** A sample the pattern must match; checked on save, never stored. */
   readonly example: string;
+  /** What the value is, told to the model ("client company name"); optional. */
+  readonly description: string;
 }
 
 export const EMPTY_DRAFT: RuleDraft = {
@@ -116,6 +118,7 @@ export const EMPTY_DRAFT: RuleDraft = {
   wholeWord: true,
   group: 0,
   example: '',
+  description: '',
   value: '',
   mode: 'label',
   label: CUSTOM_LABEL,
@@ -220,6 +223,7 @@ export function draftPattern(draft: RuleDraft, caseDefault: boolean): PatternRul
     wholeWord: draft.wholeWord,
     group: draft.group,
     example: draft.example,
+    ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
   };
 }
 
@@ -253,7 +257,7 @@ export function formLabels(configured: readonly string[], rules: ReadonlyArray<P
 
 /** The form filled from a saved rule, for editing its label or alias. */
 export function draftFrom(
-  rule: Pick<StoredRule, 'value' | 'label' | 'alias' | 'ignoreCase'>,
+  rule: Pick<StoredRule, 'value' | 'label' | 'alias' | 'ignoreCase' | 'description'>,
   labels: readonly string[],
 ): RuleDraft {
   const label = rule.label ?? CUSTOM_LABEL;
@@ -265,6 +269,7 @@ export function draftFrom(
     label,
     customLabel: !labels.includes(label),
     alias: rule.alias ?? '',
+    description: rule.description ?? '',
     editing: true,
   };
 }
@@ -593,6 +598,15 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
               onSubmit={label => act.saveDraft({ label })}
             />
           ) : null}
+          <Input
+            key="draft-description"
+            label="Description for the model (optional)"
+            placeholder="what it is, not the value: e.g. client company name"
+            value={draft.description}
+            submitLabel="save"
+            onInput={description => act.setDraft({ description })}
+            onSubmit={description => act.saveDraft({ description })}
+          />
           <Select
             key="draft-case"
             label="Ignore case"
@@ -637,6 +651,7 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
             {draft.kind === 'pattern'
               ? patternPreview(draft, data.caseDefault, data.example)
               : draftPreview(draft, data.example)}
+            {draft.description.trim() ? `, described as "${draft.description.trim()}"` : ''}
           </Text>
           <Box flexDirection="row" gap={1}>
             <Button key="draft-save" variant="primary" onPress={() => act.saveDraft()}>
@@ -658,6 +673,7 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
             <Text>{shown(rule.value)}</Text>
             <Text dimColor>
               {tag(rule)} · {rule.source}
+              {rule.description ? ` · "${rule.description}"` : ''}
             </Text>
             {data.canType ? (
               <Button key={`edit-${index}`} onPress={() => act.edit(rule)}>
@@ -681,6 +697,7 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
               {pattern.ignoreCase ? ' · ignore case' : ''}
               {pattern.wholeWord ? ' · whole word' : ''}
               {pattern.group ? ` · group ${pattern.group}` : ''} · {pattern.source}
+              {pattern.description ? ` · "${pattern.description}"` : ''}
             </Text>
             <Button key={`remove-pattern-${index}`} onPress={() => act.removePattern(pattern)}>
               Remove

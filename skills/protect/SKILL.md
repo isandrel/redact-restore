@@ -20,6 +20,7 @@ You only ever see placeholders. Deciding what is private happens on the user's m
 2. **Add their own values.** Ask the user to run `/redact-restore rules` and fill in the **Add a rule** form in the pane:
    - **Private value**: for example `Acme Corp`.
    - **Replace with**: a placeholder with a label (pick one such as `CUSTOMER`, or **Other label…**), or a fixed alias such as `CLIENT_A`.
+   - **Description for the model** (optional): what the value is, such as `client company name`, never the value itself. The model gets it once, so it understands the placeholder without seeing the value.
    - The form shows what the model will see; **Add rule** saves it. **Edit** on a saved rule changes its label or alias.
    - For a format such as an internal token, pick **Pattern** as the rule type and give a regular expression plus a made-up example it must match.
 3. **Choose where the most sensitive values live:**

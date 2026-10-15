@@ -4,6 +4,7 @@
  * read and write the store. Never log, toast or return these values to the model.
  */
 import {
+  DESCRIPTION_HINT,
   EXPORT_FORMAT,
   EXPORT_VERSION,
   IGNORED_PREFIX,
@@ -14,7 +15,7 @@ import {
 } from './defaults.ts';
 import { aliasOverlaps } from './matcher.ts';
 import { patternKey, patternProblem, type PatternProblem, type PatternRule } from './patterns.ts';
-import { CUSTOM_LABEL, isUsableAlias, LABEL_PATTERN, type ValueRule } from './placeholder.ts';
+import { CUSTOM_LABEL, isUsableAlias, isUsableDescription, LABEL_PATTERN, type ValueRule } from './placeholder.ts';
 
 export { EXPORT_FORMAT, EXPORT_VERSION, IGNORED_PREFIX, PATTERN_PREFIX, RULE_PREFIX };
 
@@ -27,6 +28,8 @@ export interface StoredRule {
   readonly alias?: string;
   /** Match regardless of case; absent follows the `custom_case_insensitive` option. */
   readonly ignoreCase?: boolean;
+  /** What the value is, told to the model instead of the value. */
+  readonly description?: string;
   readonly source: RuleSource;
   /** ISO time the rule was first added; it orders the list. */
   readonly addedAt: string;
@@ -46,7 +49,9 @@ export type RuleProblem =
   | 'no-alias'
   | 'invalid-alias'
   | 'alias-in-use'
-  | 'alias-overlap';
+  | 'alias-overlap'
+  | 'invalid-description'
+  | 'description-has-value';
 
 export type RuleParse = { readonly rule: StoredRule } | { readonly problem: RuleProblem };
 
@@ -72,6 +77,10 @@ export function makeRule(
   const alias = input.alias?.trim();
   if (label !== undefined && !LABEL_PATTERN.test(label)) return { problem: 'invalid-label' };
   if (alias !== undefined && !isUsableAlias(alias, value)) return { problem: alias ? 'invalid-alias' : 'no-alias' };
+  const description = input.description?.trim() || undefined;
+  if (description !== undefined && !isUsableDescription(description)) return { problem: 'invalid-description' };
+  // The description goes to the model: it must not hold the value it describes.
+  if (description?.toLowerCase().includes(value.toLowerCase())) return { problem: 'description-has-value' };
   const others = existing.filter(rule => ruleKey(rule.value) !== ruleKey(value));
   if (alias && others.some(rule => rule.alias === alias)) return { problem: 'alias-in-use' };
   // An alias is restored wherever it appears: it must not overlap any other
@@ -92,6 +101,7 @@ export function makeRule(
       value,
       ...(alias ? { alias } : label ? { label } : {}),
       ...(input.ignoreCase !== undefined ? { ignoreCase: input.ignoreCase } : {}),
+      ...(description ? { description } : {}),
       source,
       addedAt: now.toISOString(),
     },
@@ -116,6 +126,10 @@ export function describeProblem(problem: RuleProblem): string {
       return 'That alias already stands for another value.';
     case 'alias-overlap':
       return "That alias overlaps another rule's value, or this value overlaps another rule's alias.";
+    case 'invalid-description':
+      return DESCRIPTION_HINT;
+    case 'description-has-value':
+      return 'The description contains the value itself: describe what it is without writing it.';
   }
 }
 
@@ -130,6 +144,7 @@ function valueRuleOf(item: Record<string, unknown>): ValueRule | undefined {
     ...(typeof item.label === 'string' ? { label: item.label } : {}),
     ...(typeof item.alias === 'string' ? { alias: item.alias } : {}),
     ...(typeof item.ignoreCase === 'boolean' ? { ignoreCase: item.ignoreCase } : {}),
+    ...(typeof item.description === 'string' ? { description: item.description } : {}),
   };
 }
 
@@ -141,13 +156,14 @@ function patternRuleOf(item: Record<string, unknown>): PatternRule | undefined {
     ignoreCase: item.ignoreCase === true,
     wholeWord: item.wholeWord !== false,
     group: typeof item.group === 'number' && Number.isInteger(item.group) ? item.group : 0,
+    ...(typeof item.description === 'string' ? { description: item.description } : {}),
   };
 }
 
 // Checking a pattern runs probes; remember results so loading the store on every prompt stays cheap.
 const checked = new Map<string, PatternProblem | 'ok'>();
 function checkOnce(rule: PatternRule): PatternProblem | undefined {
-  const key = `${patternKey(rule)}\u0002${rule.label ?? ''}`;
+  const key = `${patternKey(rule)}\u0002${rule.label ?? ''}\u0002${rule.description ?? ''}`;
   let result = checked.get(key);
   if (result === undefined) {
     result = patternProblem({ ...rule, example: undefined }) ?? 'ok';
@@ -163,10 +179,13 @@ export function makePattern(
   source: RuleSource,
   now: Date,
 ): { pattern: StoredPattern } | { problem: PatternProblem } {
+  const { description: rawDescription, ...rest } = input;
+  const description = rawDescription?.trim() || undefined;
   const rule: PatternRule = {
-    ...input,
+    ...rest,
     pattern: input.pattern.trim(),
     ...(input.label ? { label: input.label.trim().toUpperCase() } : {}),
+    ...(description ? { description } : {}),
   };
   const problem = input.example !== undefined ? patternProblem(rule) : checkOnce(rule);
   if (problem) return { problem };
@@ -207,7 +226,10 @@ export function upsertPattern(
   const index = list.findIndex(one => patternKey(one) === patternKey(pattern));
   if (index === -1) return { patterns: [...list, pattern], change: 'added' };
   const current = list[index] as StoredPattern;
-  if ((current.label ?? CUSTOM_LABEL) === (pattern.label ?? CUSTOM_LABEL))
+  if (
+    (current.label ?? CUSTOM_LABEL) === (pattern.label ?? CUSTOM_LABEL) &&
+    current.description === pattern.description
+  )
     return { patterns: [...list], change: 'unchanged' };
   const updated = { ...pattern, addedAt: current.addedAt };
   return { patterns: list.map((one, i) => (i === index ? updated : one)), change: 'updated' };
@@ -215,7 +237,7 @@ export function upsertPattern(
 
 /** Identity of a pattern list, for change detection and caches. */
 export function patternsKey(list: readonly StoredPattern[]): string {
-  return JSON.stringify(list.map(one => [patternKey(one), one.label ?? '']));
+  return JSON.stringify(list.map(one => [patternKey(one), one.label ?? '', one.description ?? '']));
 }
 
 /** Reads the stored list, dropping anything malformed (the store is a local file a person may edit). */
@@ -246,7 +268,8 @@ export function upsertRule(
     current.value === rule.value &&
     current.label === rule.label &&
     current.alias === rule.alias &&
-    current.ignoreCase === rule.ignoreCase
+    current.ignoreCase === rule.ignoreCase &&
+    current.description === rule.description
   )
     return { rules: [...rules], change: 'unchanged' };
   // An update keeps the rule's place: its added time stays.
@@ -285,6 +308,7 @@ export function exportRules(rules: readonly StoredRule[], now: Date, patterns: r
         ...(rule.label ? { label: rule.label } : {}),
         ...(rule.alias ? { alias: rule.alias } : {}),
         ...(rule.ignoreCase !== undefined ? { ignoreCase: rule.ignoreCase } : {}),
+        ...(rule.description ? { description: rule.description } : {}),
       })),
       patterns: patterns.map(one => ({
         pattern: one.pattern,
@@ -292,6 +316,7 @@ export function exportRules(rules: readonly StoredRule[], now: Date, patterns: r
         ignoreCase: one.ignoreCase,
         wholeWord: one.wholeWord,
         group: one.group,
+        ...(one.description ? { description: one.description } : {}),
       })),
     },
     null,
@@ -417,7 +442,14 @@ export function sortRules(rules: readonly StoredRule[]): StoredRule[] {
 /** Identity of a rule list, for change detection and caches. */
 export function rulesKey(rules: readonly StoredRule[]): string {
   return JSON.stringify(
-    rules.map(rule => [rule.value, rule.label ?? '', rule.alias ?? '', rule.ignoreCase ?? '', rule.source]),
+    rules.map(rule => [
+      rule.value,
+      rule.label ?? '',
+      rule.alias ?? '',
+      rule.ignoreCase ?? '',
+      rule.description ?? '',
+      rule.source,
+    ]),
   );
 }
 

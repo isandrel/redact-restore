@@ -38,6 +38,8 @@ export interface Detector {
   readonly outranks?: readonly string[];
   /** Tie-break against other matches of the same span: lower wins (built-ins 1, gitleaks 2). */
   readonly rank?: number;
+  /** What a match is, told to the model with its placeholder (pattern rules). */
+  readonly description?: string;
   find(text: string): Span[];
 }
 

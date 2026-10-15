@@ -14,6 +14,7 @@ import {
   PUBLIC_GIT_HOSTS,
   SECRET_KEY,
   TRIVIAL_VALUE,
+  SCAN_DESCRIPTIONS,
 } from './defaults.ts';
 import { envAssignments, findInternalHosts } from './detectors.ts';
 import { findPrivateMatches, type MatchingOptions } from './matcher.ts';
@@ -25,6 +26,8 @@ export interface ScanCandidate {
   readonly label: string;
   /** Where it was found, without the value (`git config user.name`, `.env (DB_PASSWORD)`). */
   readonly source: string;
+  /** What it is, for the rule's description (told to the model, never the value). */
+  readonly description?: string;
 }
 
 export interface ScanInputs {
@@ -131,45 +134,46 @@ function lastSegment(path: string): string {
 export function collectCandidates(inputs: ScanInputs): ScanCandidate[] {
   const candidates: ScanCandidate[] = [];
   const seen = new Set<string>();
-  const add = (value: string | undefined, label: string, source: string) => {
+  const add = (value: string | undefined, label: string, source: string, description?: string) => {
     const trimmed = value?.trim() ?? '';
     if (trimmed.length < MIN_CUSTOM_VALUE_LENGTH || TRIVIAL_VALUE.test(trimmed)) return;
     const key = ruleKey(trimmed);
     if (seen.has(key)) return;
     seen.add(key);
-    candidates.push({ value: trimmed, label, source });
+    candidates.push({ value: trimmed, label, source, ...(description ? { description } : {}) });
   };
 
-  add(inputs.gitName, 'NAME', 'git config user.name');
-  add(inputs.gitEmail, 'EMAIL', 'git config user.email');
+  add(inputs.gitName, 'NAME', 'git config user.name', SCAN_DESCRIPTIONS.gitName);
+  add(inputs.gitEmail, 'EMAIL', 'git config user.email', SCAN_DESCRIPTIONS.gitEmail);
 
   for (const remote of parseRemotes(inputs.remotes ?? '')) {
     const isPublic = PUBLIC_GIT_HOSTS.includes(remote.host);
-    if (!isPublic) add(remote.host, 'HOST', 'git remote host');
-    add(remote.owner, 'ORG', 'git remote owner');
-    if (!isPublic) add(remote.repo, 'PROJECT', 'git remote repository');
+    if (!isPublic) add(remote.host, 'HOST', 'git remote host', SCAN_DESCRIPTIONS.remoteHost);
+    add(remote.owner, 'ORG', 'git remote owner', SCAN_DESCRIPTIONS.remoteOwner);
+    if (!isPublic) add(remote.repo, 'PROJECT', 'git remote repository', SCAN_DESCRIPTIONS.remoteRepo);
   }
 
   for (const line of (inputs.logAuthors ?? '').split(/\r?\n/)) {
     const [name, email] = line.split('\u0000');
     if (!name || BOT_AUTHOR.test(name) || BOT_AUTHOR.test(email ?? '')) continue;
-    add(name, 'NAME', 'git log author');
-    add(email, 'EMAIL', 'git log author');
+    add(name, 'NAME', 'git log author', SCAN_DESCRIPTIONS.logName);
+    add(email, 'EMAIL', 'git log author', SCAN_DESCRIPTIONS.logEmail);
   }
 
   const author = inputs.packageJson ? packageAuthor(inputs.packageJson) : {};
-  add(author.name, 'NAME', 'package.json author');
-  add(author.email, 'EMAIL', 'package.json author');
+  add(author.name, 'NAME', 'package.json author', SCAN_DESCRIPTIONS.packageName);
+  add(author.email, 'EMAIL', 'package.json author', SCAN_DESCRIPTIONS.packageEmail);
 
   const host = inputs.hostname?.trim().replace(LOCAL_HOST_SUFFIX, '');
-  add(host, 'HOST', 'computer name');
+  add(host, 'HOST', 'computer name', SCAN_DESCRIPTIONS.computer);
   const account = inputs.home ? lastSegment(inputs.home) : '';
-  if (!GENERIC_ACCOUNTS.includes(account.toLowerCase())) add(account, 'USER', 'home folder name');
+  if (!GENERIC_ACCOUNTS.includes(account.toLowerCase()))
+    add(account, 'USER', 'home folder name', SCAN_DESCRIPTIONS.account);
 
   for (const file of inputs.envFiles ?? []) {
     for (const { key, value } of parseEnvFile(file.text)) {
       if (value.startsWith('${') || value.includes('{{')) continue;
-      add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`);
+      add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`, SCAN_DESCRIPTIONS.envValue(key));
     }
   }
   return candidates;
@@ -184,15 +188,15 @@ export function fileCandidates(
 ): ScanCandidate[] {
   const candidates: ScanCandidate[] = [];
   const seen = new Set<string>();
-  const add = (value: string, label: string, source: string) => {
+  const add = (value: string, label: string, source: string, description?: string) => {
     const key = ruleKey(value);
     if (value.length < MIN_CUSTOM_VALUE_LENGTH || seen.has(key)) return;
     seen.add(key);
-    candidates.push({ value, label, source });
+    candidates.push({ value, label, source, ...(description ? { description } : {}) });
   };
   for (const file of files) {
     for (const { key, value } of envAssignments(file.text)) {
-      add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`);
+      add(value, SECRET_KEY.test(key) ? 'SECRET' : 'ENV', `${file.name} (${key})`, SCAN_DESCRIPTIONS.envValue(key));
     }
     for (const { start, end } of findInternalHosts(file.text)) add(file.text.slice(start, end), 'HOST', file.name);
   }

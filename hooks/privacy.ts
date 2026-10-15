@@ -14,9 +14,14 @@ import { CUSTOM_LABEL, DEFAULT_SCHEME, type PlaceholderScheme } from './placehol
  */
 export type Vault = Record<string, string>;
 
+/** Placeholder to description ("client company name"), for the model; never a value. */
+export type Notes = Record<string, string>;
+
 export interface MaskResult {
   text: string;
   additions: Vault;
+  /** Descriptions of new placeholders, from their rule or pattern. */
+  notes: Notes;
   /** Replacements made, counting every occurrence. */
   count: number;
 }
@@ -103,10 +108,11 @@ export function uniqueMatches(
 export function maskText(text: string, options: MatchingOptions, vault: Vault): MaskResult {
   const scheme = options.placeholders ?? DEFAULT_SCHEME;
   const matches = findPrivateMatches(text, options, knownValues(vault, scheme), Object.keys(vault));
-  if (matches.length === 0) return { text, additions: {}, count: 0 };
+  if (matches.length === 0) return { text, additions: {}, notes: {}, count: 0 };
 
   const reverse = new Map(Object.entries(vault).map(([token, value]) => [value, token]));
   const additions: Vault = {};
+  const notes: Notes = {};
   const fragments: string[] = [];
   let last = 0;
 
@@ -117,7 +123,10 @@ export function maskText(text: string, options: MatchingOptions, vault: Vault): 
       if (rule?.alias !== undefined) {
         // One alias per configured value; a case variant reuses it.
         token = rule.alias;
-        if (vault[token] === undefined && additions[token] === undefined) additions[token] = match.value;
+        if (vault[token] === undefined && additions[token] === undefined) {
+          additions[token] = match.value;
+          if (rule.description) notes[token] = rule.description;
+        }
       } else {
         const label = rule?.label ?? match.category;
         token = scheme.make(label, match.value);
@@ -125,6 +134,8 @@ export function maskText(text: string, options: MatchingOptions, vault: Vault): 
         const holder = vault[token] ?? additions[token];
         if (holder !== undefined && holder !== match.value) token = scheme.make(label);
         additions[token] = match.value;
+        const description = rule?.description ?? match.description;
+        if (description) notes[token] = description;
       }
       reverse.set(match.value, token);
     }
@@ -132,7 +143,7 @@ export function maskText(text: string, options: MatchingOptions, vault: Vault): 
     last = match.end;
   }
   fragments.push(text.slice(last));
-  return { text: fragments.join(''), additions, count: matches.length };
+  return { text: fragments.join(''), additions, notes, count: matches.length };
 }
 
 /** Placeholders of the active format in `text`, known or not. */
@@ -261,16 +272,19 @@ export function createStreamRestorer(vault: Vault, scheme: PlaceholderScheme = D
 export function createMasker(options: MatchingOptions, vault: Vault) {
   const working: Vault = { ...vault };
   const additions: Vault = {};
+  const notes: Notes = {};
   let count = 0;
   return {
     mask(text: string): string {
       const masked = maskText(text, options, working);
       Object.assign(working, masked.additions);
       Object.assign(additions, masked.additions);
+      Object.assign(notes, masked.notes);
       count += masked.count;
       return masked.text;
     },
     additions: (): Vault => additions,
+    notes: (): Notes => notes,
     count: (): number => count,
   };
 }
@@ -283,6 +297,7 @@ export interface BlockPolicy {
 export interface MaskBlocksResult<T> {
   content: T[];
   additions: Vault;
+  notes: Notes;
   withheldMedia: number;
   /** Replacements made, counting every occurrence. */
   count: number;
@@ -331,7 +346,7 @@ export function maskContentBlocks<T extends ContentBlock>(
     return block;
   });
 
-  return { content, additions: masker.additions(), withheldMedia, count: masker.count() };
+  return { content, additions: masker.additions(), notes: masker.notes(), withheldMedia, count: masker.count() };
 }
 
 /** Replacement content when scanning failed: no text, tool result or media survives. */
@@ -473,4 +488,18 @@ export function describeFindings(findings: readonly AuditFinding[]): string {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return [...counts].map(([key, count]) => `${count} ${key}`).join(', ');
+}
+
+/**
+ * The note for the model that says what new placeholders stand for: one line
+ * per placeholder, in the order given, at most `limit` of them. Descriptions
+ * pass through `mask` first, so a description that names another private value
+ * carries that value's placeholder. Never holds a value.
+ */
+export function legendText(
+  entries: ReadonlyArray<readonly [token: string, description: string]>,
+  header: string,
+  mask: (text: string) => string,
+): string {
+  return [header, ...entries.map(([token, description]) => `- ${token}: ${mask(description)}`)].join('\n');
 }

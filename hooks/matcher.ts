@@ -13,6 +13,8 @@ export interface PrivateMatch {
   category: PrivacyCategory;
   /** 0 for configured or already-known values, 1 for detectors; lower wins a tie. */
   priority: number;
+  /** The detector's description (a pattern rule's), told to the model with the placeholder. */
+  description?: string;
 }
 
 export interface MatchingOptions {
@@ -107,7 +109,7 @@ export function normalizeRules(input: readonly ValueRule[]): NormalizedValues {
         aliasOverlaps(rule.alias, rule.value, allValues))
     ) {
       invalid += 1;
-      kept = { value: rule.value };
+      kept = { value: rule.value, ...(rule.description ? { description: rule.description } : {}) };
     }
     if (!spellings.has(kept.value)) {
       spellings.add(kept.value);
@@ -306,6 +308,7 @@ export function findPrivateMatches(
         value: text.slice(start, end),
         category: label ?? detector.label,
         priority: detector.rank ?? 1,
+        ...(detector.description ? { description: detector.description } : {}),
       };
       candidates.push(candidate);
       if (detector.outranks) {
