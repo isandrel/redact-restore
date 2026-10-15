@@ -278,19 +278,15 @@ describe('streaming restoration', () => {
   }
   const split = (token: string) => ['About ', token.slice(0, 9), token.slice(9, 30), token.slice(30), '.'];
 
-  test('off by default: the stream keeps placeholders', configured, async ($, on) => {
+  test('on by default: placeholders split across chunks are restored', configured, async ($, on) => {
+    const { text } = await streamed($, on, split);
+    expect(text).toBe(`About ${SECRET}.`);
+  });
+
+  test('off: the stream keeps placeholders', { options: { ...base, restore_streaming: false } }, async ($, on) => {
     const { token, text } = await streamed($, on, split);
     expect(text).toBe(`About ${token}.`);
   });
-
-  test(
-    'restore_streaming restores placeholders split across chunks',
-    { options: { ...base, restore_streaming: true } },
-    async ($, on) => {
-      const { text } = await streamed($, on, split);
-      expect(text).toBe(`About ${SECRET}.`);
-    },
-  );
 });
 
 describe('local restoration', () => {

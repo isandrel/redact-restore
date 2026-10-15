@@ -149,7 +149,7 @@ export function parseConfig(options: RawOptions, stableKey?: () => string | unde
     placeholderIds,
     restoreDisplay: flag(options, 'restore_display', true),
     displayRows: displayRows(patterns(options, 'restore_display_rows', DISPLAY_ROWS)),
-    restoreStreaming: flag(options, 'restore_streaming', false),
+    restoreStreaming: flag(options, 'restore_streaming', true),
     restore: {
       mode: restoreMode(options.restore_mode),
       keepTools: patterns(options, 'keep_tools', DEFAULT_POLICY.keepTools),

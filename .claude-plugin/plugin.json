@@ -91,8 +91,8 @@
     "restore_streaming": {
       "type": "boolean",
       "title": "Restore while replies stream",
-      "description": "Show original values while a reply is still streaming, not only once it is complete. The engine records the rewritten text, which is masked again before it is stored; off keeps placeholders visible until the reply finishes.",
-      "default": false
+      "description": "Show original values while a reply is still streaming, not only once it is complete. The engine records the rewritten text, which is masked again before it is stored. Off keeps placeholders visible until the reply finishes.",
+      "default": true
     },
     "restore_mode": {
       "type": "string",
