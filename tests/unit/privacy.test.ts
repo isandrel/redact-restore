@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing';
 import { findEmails, findPrivateMatches, normalizeCustomValues } from '../../hooks/matcher.ts';
 import {
   auditMessages,
+  createAuditMemo,
   createStreamRestorer,
   findPlaceholders,
   maskContentBlocks,
@@ -94,12 +95,12 @@ describe('email scanner', () => {
     const samples = [
       'alice@example.com',
       'x a.b+c@sub.example.co.uk.',
-      'a@b.co1',
-      'a@b.com.x1',
-      'x@a.com@b.org',
+      'a@x.example1',
+      'a@x.example.x1',
+      'x@a.example@b.test',
       '@nolocal.example',
       'name@nodot',
-      'two a@b.io and c@d.dev',
+      'two a@x.test and c@y.test',
       'a@.com',
       'a@b..example',
     ];
@@ -225,6 +226,17 @@ describe('outbound audit', () => {
     );
     expect(findings.map(f => f.reason)).toEqual(['EMAIL', 'CUSTOM', 'MEDIA']);
     expect(JSON.stringify(findings)).not.toMatch(/alice|Phoenix/);
+  });
+});
+
+describe('outbound audit memo', () => {
+  test('text found clean is checked again against values learned later', () => {
+    const plain = { ...config, customValues: [], redactEmails: false, detectors: [] };
+    const memo = createAuditMemo();
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'x Phoenix Example' }] }];
+    expect(auditMessages(messages, plain, {}, media, memo)).toEqual([]);
+    const later = { '{{PRIVATE:CUSTOM#000000000001}}': 'Phoenix Example' };
+    expect(auditMessages(messages, plain, later, media, memo).map(f => f.reason)).toEqual(['CUSTOM']);
   });
 });
 

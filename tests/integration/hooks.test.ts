@@ -22,7 +22,7 @@ const filesOnly = { options: { ...base, restore_mode: 'files' } };
 function harness(
   on: On,
   messages: unknown[] = [],
-  store: Record<string, unknown> = {},
+  store: Record<string, unknown> | Map<string, unknown> = {},
   disk: Record<string, string> = {},
 ) {
   const seen = {
@@ -34,8 +34,22 @@ function harness(
     sent: false,
     status: [] as Array<string | undefined>,
     files: [] as Array<{ path: string; text: string }>,
+    /** File writes and process runs, in order. */
+    log: [] as string[],
   };
-  mock.store(on, store);
+  if (store instanceof Map) {
+    // A store the test can read back afterwards.
+    on('store.keys', () => ({ value: [...store.keys()] }) as never);
+    on('store.get', ($, e) => ({ value: store.get(e.key) }) as never);
+    on('store.set', ($, e) => {
+      store.set(e.key, e.value);
+      return { value: undefined } as never;
+    });
+    on('store.delete', ($, e) => {
+      store.delete(e.key);
+      return { value: undefined } as never;
+    });
+  } else mock.store(on, store);
   on('ui.status', ($, e) => {
     seen.status.push(e.text);
     return { value: undefined } as never;
@@ -45,7 +59,12 @@ function harness(
   on('session.model', () => ({ value: 'test-model' }) as never);
   on('fs.write', ($, e) => {
     seen.files.push({ path: e.path, text: e.text });
+    seen.log.push(`write ${e.path}`);
     return { value: undefined } as never;
+  });
+  on('process.run', ($, e) => {
+    seen.log.push(`run ${e.argv.join(' ')}`);
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never;
   });
   on('fs.read', ($, e) => {
     const written = seen.files.findLast(file => file.path === e.path)?.text ?? disk[e.path];
@@ -298,6 +317,95 @@ describe('streaming restoration', () => {
   });
 });
 
+describe('fail closed', () => {
+  // A broken session state makes every hook's own work throw; each fallback must
+  // mask without recording, withhold, refuse or drop, never pass a raw value on.
+  const brokenState = (on: On) => on('state.get', () => ({ deny: 'state unavailable' }) as never);
+
+  test('turn.step refuses when the messages cannot be read', configured, async ($, on) => {
+    const seen = harness(on, 'not a list' as never);
+    expect((await step($))?.answer).toBe('');
+    expect(seen.sent).toBe(false);
+  });
+
+  test('prompt.attachment that fails drops the text', configured, async ($, on) => {
+    brokenState(on);
+    let seen: string | null | undefined;
+    on('prompt.attachment', ($, e) => {
+      seen = e.text;
+      return { text: e.text };
+    });
+    const result = await $.prompt.attachment({
+      type: 'file',
+      text: `contents: ${SECRET}`,
+      origin: { kind: 'engine' },
+    } as never);
+    expect(JSON.stringify(result ?? null)).not.toContain(SECRET);
+    expect(seen ?? '').not.toContain(SECRET);
+  });
+
+  test('session.append that fails still masks the row, without recording', configured, async ($, on) => {
+    brokenState(on);
+    let stored: unknown;
+    on('session.append', ($, e, next) => {
+      stored = e.message.content;
+      return next(e);
+    });
+    await $.session
+      .append({
+        door: 'tool-result',
+        uuid: 'u1',
+        origin: { kind: 'tool', tool: 'Read' },
+        message: {
+          type: 'user',
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 't1', content: `x ${SECRET}` }],
+        },
+      } as never)
+      .catch(() => undefined);
+    expect(JSON.stringify(stored)).not.toContain(SECRET);
+  });
+
+  test('tool.call that fails is denied', configured, async ($, on) => {
+    brokenState(on);
+    const tools: unknown[] = [];
+    on('tool.call', ($, e) => {
+      tools.push(e);
+      return { deny: 'bottom' };
+    });
+    const result = await $.tool.call({
+      tool: 'Write',
+      tool_use_id: 'w1',
+      file_path: '/tmp/x',
+      content: '{{PRIVATE:CUSTOM#000000000001}}',
+    });
+    expect(tools).toEqual([]);
+    expect(JSON.stringify(result)).toMatch(/Redact Restore/);
+  });
+});
+
+describe('streaming restore is masked again before it is stored', () => {
+  test('an assistant row holding a restored value is stored with its placeholder', configured, async ($, on) => {
+    let stored: unknown;
+    on('session.append', ($, e, next) => {
+      stored = e.message.content;
+      return next(e);
+    });
+    const seen = harness(on);
+    const token = await placeholderFor($, seen, SECRET);
+    await $.session
+      .append({
+        door: 'assistant',
+        uuid: 'a1',
+        origin: { kind: 'model' },
+        message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: `About ${SECRET}.` }] },
+      } as never)
+      .catch(() => undefined);
+    expect(JSON.stringify(stored)).toContain(token);
+    expect(JSON.stringify(stored)).not.toContain(SECRET);
+  });
+});
+
 describe('local restoration', () => {
   const write = (content: string) => ({
     tool: 'Write' as const,
@@ -507,6 +615,33 @@ describe('descriptions', () => {
     expect(text).toContain('internal codename of the launch');
   });
 
+  test("a subagent's tool result gets no note; the main conversation is told later", { options: {} }, async ($, on) => {
+    let stored: unknown;
+    on('session.append', ($, e, next) => {
+      stored = e.message.content;
+      return next(e);
+    });
+    const seen = harness(on, [], described);
+    await submit($, 'hello');
+    await $.session
+      .append({
+        door: 'tool-result',
+        uuid: 'u2',
+        agentId: 'agent-1',
+        origin: { kind: 'tool', tool: 'Bash' },
+        message: {
+          type: 'user',
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 't2', content: `cat said ${SECRET}` }],
+        },
+      } as never)
+      .catch(() => undefined);
+    expect(JSON.stringify(stored)).not.toContain('internal codename of the launch');
+    expect(JSON.stringify(stored)).not.toContain(SECRET);
+    await submit($, 'next');
+    expect(JSON.stringify(seen.context)).toContain('internal codename of the launch');
+  });
+
   test('after a compaction, descriptions are told again', { options: {} }, async ($, on) => {
     const summary = { role: 'user', text: 'summary', toolUses: [] };
     on('session.compact', () => ({ messages: [summary] }) as never);
@@ -546,12 +681,14 @@ describe('stable placeholder ids', () => {
     expect(seen.prompt).toBe(`Ask about {{PRIVATE:CUSTOM#${id}}}`);
   });
 
-  test('without a stored key, one is made and used', stable, async ($, on) => {
-    const seen = harness(on);
+  test('without a stored key, one is made, stored and used', stable, async ($, on) => {
+    const store = new Map<string, unknown>();
+    const seen = harness(on, [], store);
     await submit($, SECRET);
-    const first = seen.prompt;
-    expect(first).toMatch(PLACEHOLDER);
-    expect(first).not.toContain(SECRET);
+    const key = store.get('placeholder-id-key');
+    expect(key).toMatch(/^[a-f0-9]{64}$/);
+    const id = hmacSha256Hex(String(key), `CUSTOM\u0000${SECRET}`).slice(0, 12);
+    expect(seen.prompt).toBe(`{{PRIVATE:CUSTOM#${id}}}`);
   });
 });
 
@@ -676,6 +813,18 @@ describe('session maps for /resume', () => {
     await submit($, `again ${SECRET}`);
     expect(seen.prompt).toBe(`again ${token}`);
   });
+
+  test(
+    'the folder is made owner-only before the file is written, and the file is chmod 600',
+    configured,
+    async ($, on) => {
+      const seen = harness(on);
+      await submit($, SECRET);
+      const dir = MAP.slice(0, MAP.lastIndexOf('/'));
+      const steps = seen.log.filter(line => line.includes('/sessions'));
+      expect(steps.slice(0, 3)).toEqual([`run mkdir -p -m 700 ${dir}`, `write ${MAP}`, `run chmod 600 ${MAP}`]);
+    },
+  );
 
   test('a file that is not a session map is ignored', configured, async ($, on) => {
     const seen = harness(on, [], {}, { [MAP]: '{"vault":{"x":1}}' });

@@ -135,8 +135,10 @@ const timers = globalThis as unknown as { setTimeout(run: () => void, ms: number
 const sleep = (ms: number) => new Promise<void>(resolve => timers.setTimeout(resolve, ms));
 
 /** Handlers run after the press resolves; wait for their writes. */
-async function eventually(check: () => Promise<boolean>): Promise<void> {
-  for (let tries = 0; tries < 50; tries += 1) {
+/** Polls until the check passes; a deadline, not a try count, so slow runners do not flake. */
+async function eventually(check: () => Promise<boolean>, deadlineMs = 2000): Promise<void> {
+  const until = Date.now() + deadlineMs;
+  while (Date.now() < until) {
     if (await check()) return;
     await sleep(5);
   }
@@ -394,6 +396,42 @@ describe('path scan', () => {
   );
 });
 
+describe('path scan limits', () => {
+  const dir = (name: string): Entry => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false });
+  const file = (name: string): Entry => ({ name, kind: 'file', size: 40, mtimeMs: 0, isLink: false });
+
+  test('a scan that reaches scan_max_files says it stopped', { options: { scan_max_files: 1 } }, async ($, on) => {
+    world(
+      on,
+      {},
+      { '/home/user/proj/a.env': 'A=one-value\n', '/home/user/proj/b.env': 'B=two-value\n' },
+      {
+        '/home/user/proj': [file('a.env'), file('b.env')],
+      },
+    );
+    expect(await run($, 'scan ~/proj')).toMatch(
+      /^Scan of ~\/proj \(1 file\(s\) read; stopped at a file, folder or depth limit\)/,
+    );
+  });
+
+  test(
+    'a skipped folder after the last file does not make the scan partial',
+    { options: { scan_max_files: 1 } },
+    async ($, on) => {
+      world(
+        on,
+        {},
+        { '/home/user/proj/a.env': 'A=one-value\n' },
+        {
+          '/home/user/proj': [file('a.env'), dir('node_modules')],
+          '/home/user/proj/node_modules': [file('x.env')],
+        },
+      );
+      expect(await run($, 'scan ~/proj')).toMatch(/^Scan of ~\/proj \(1 file\(s\) read\)/);
+    },
+  );
+});
+
 describe('session map retention', () => {
   const DIR = `${HOME}/.claude/redact-restore/sessions`;
   const tree = {
@@ -455,6 +493,8 @@ describe('import and export', () => {
     expect(seen.prompt).toMatch(/\{\{PRIVATE:HOST#/);
 
     expect(await run($, 'import /tmp/one.json --replace')).toMatch(/replaced all saved rules.*1 saved rule\(s\) now/);
+    // The flag may come first.
+    expect(await run($, 'import --replace /tmp/one.json')).toMatch(/replaced all saved rules.*1 saved rule\(s\) now/);
     expect(await run($, 'status')).toMatch(/Rules: 1 saved/);
   });
 

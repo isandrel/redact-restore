@@ -78,3 +78,58 @@ describe('placeholder formats', () => {
     expect(unmaskText(input, masked.additions, true, placeholders)).toBe('xProject Phoenixy');
   });
 });
+
+describe('second review: matching across vaults, placeholders and large inputs', () => {
+  const known = (middle: string) =>
+    Array.from({ length: 128 }, (_, i) => ({
+      value: i === 50 ? middle : `Known ${i} Example`,
+      category: 'CUSTOM' as const,
+    }));
+
+  test("known-value segments never reuse another vault's regex", () => {
+    const empty = { ...options, customValues: [], detectors: [] };
+    expect(findPrivateMatches('Alpha Middle Example', empty, known('Alpha Middle Example')).map(m => m.value)).toEqual([
+      'Alpha Middle Example',
+    ]);
+    const other = findPrivateMatches(
+      'Alpha Middle Example and Bravo Middle Example',
+      empty,
+      known('Bravo Middle Example'),
+    );
+    expect(other.map(m => m.value)).toEqual(['Bravo Middle Example']);
+  });
+
+  test('a raw value right next to a placeholder is still masked', () => {
+    const token = '{{PRIVATE:CUSTOM#000000000001}}';
+    const secret = `tok_${varied(16)}`;
+    const env = maskText(`API_TOKEN=${token}${secret}`, options, { [token]: 'Project Phoenix' });
+    expect(env.text).not.toContain(secret);
+    expect(env.text).toContain(token);
+    const password = `Pw9${varied(9)}`;
+    const url = maskText(`postgres://${token}:${password}@db.example.internal/x`, options, {
+      [token]: 'Project Phoenix',
+    });
+    expect(url.text).not.toContain(password);
+    expect(url.text).toContain(token);
+  });
+
+  test('1 MB of connection strings masks in linear time', () => {
+    const line = `DB_URL=postgres://svc:Pw9${varied(9)}@h.example.internal/x\n`;
+    const text = line.repeat(Math.ceil(1_000_000 / line.length));
+    const started = performance.now();
+    const masked = maskText(text, options, {});
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(masked.text).not.toContain('Pw9');
+  });
+
+  test('1 MB with a placeholder on every line masks in linear time', () => {
+    const token = '{{PRIVATE:CUSTOM#000000000001}}';
+    const line = `${token} met alice@example.com at build.acme.internal\n`;
+    const text = line.repeat(Math.ceil(1_000_000 / line.length));
+    const started = performance.now();
+    const masked = maskText(text, options, { [token]: 'Project Phoenix' });
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(masked.text).not.toContain('alice@example.com');
+    expect(masked.text.split(token).length).toBe(text.split(token).length);
+  });
+});

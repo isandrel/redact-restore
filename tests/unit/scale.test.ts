@@ -24,6 +24,8 @@ describe('scale', () => {
       masker.mask(`row ${i}: Value ${i} Example met Client ${i} Corp at user${i}@example.com`);
     const elapsed = performance.now() - started;
     expect(Object.keys(masker.additions())).toHaveLength(600);
+    // Vault values are found too, and keep their placeholder.
+    expect(masker.mask('again Value 7 Example')).toBe('again {{PRIVATE:CUSTOM#000000000007}}');
     expect(Object.keys(vault)).toHaveLength(VAULT_SIZE);
     expect(elapsed).toBeLessThan(1500);
   });
@@ -33,6 +35,8 @@ describe('scale', () => {
     const text = line.repeat(Math.ceil(1_000_000 / line.length));
     const started = performance.now();
     const masked = maskText(text, matching, vault);
+    for (const raw of ['Client 7 Corp', 'tok_9f8e7d6c5b4a', 'build.acme.internal', 'user@example.com'])
+      expect(masked.text).not.toContain(raw);
     const restored = unmaskText(masked.text, { ...vault, ...masked.additions });
     expect(performance.now() - started).toBeLessThan(1500);
     expect(restored).toBe(text);

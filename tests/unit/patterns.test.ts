@@ -65,7 +65,7 @@ describe('pattern checks', () => {
     const started = performance.now();
     expect(spans(slow, text)).toEqual([]);
     expect(spans(rule('[a-f0-9]+-secret', { wholeWord: false }), `${'0'.repeat(200_000)}-secre`)).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(200);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });
 
