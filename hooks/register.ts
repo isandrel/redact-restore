@@ -72,6 +72,7 @@ import {
   maskContentBlocks,
   maskText,
   restoreInput,
+  uniqueMatches,
   unmaskText,
   withholdContentBlocks,
   type Vault,
@@ -314,9 +315,24 @@ async function setDraft($: EngineInterface, change: Partial<RuleDraft>): Promise
 /** For pane handlers whose failure leaves nothing to undo (a view switch, a draft keystroke). */
 function ignore(): void {}
 
-/** Closing the pane drops an unsaved draft: it may hold a typed value. */
+/**
+ * Checks pasted text as the masking hooks would, with the session's known values
+ * and placeholders, but records nothing: the result stays in the pane.
+ */
+async function testText($: EngineInterface, ctx: Context, text: string): Promise<void> {
+  if (!text.trim()) {
+    await update($, pane, current => ({ ...current, test: undefined, notice: '' }));
+    return;
+  }
+  const matching = matchingFor(ctx, await loadRules($));
+  const masked = maskText(text, matching, await read($, vault));
+  const found = uniqueMatches(text, matching, await read($, vault));
+  await update($, pane, current => ({ ...current, notice: '', test: { text, masked: masked.text, found } }));
+}
+
+/** Closing the pane drops an unsaved draft and a tested text: both may hold originals. */
 async function closePane($: EngineInterface): Promise<void> {
-  await update($, pane, current => ({ ...current, draft: EMPTY_DRAFT, notice: '' }));
+  await update($, pane, current => ({ ...current, draft: EMPTY_DRAFT, test: undefined, notice: '' }));
   await $.ui.close({ id: PANE_ID });
 }
 
@@ -869,6 +885,9 @@ export const register: Register = (on, options) => {
         case 'session':
           await openPane($, 'session');
           return { text: 'Redact Restore session pane opened.' };
+        case 'test':
+          await openPane($, 'test');
+          return { text: 'Redact Restore test pane opened. Text checked there stays on this machine.' };
         case 'status':
           return { text: await statusText($, ctx) };
         case 'export':
@@ -924,6 +943,7 @@ export const register: Register = (on, options) => {
         acceptAll: () => void acceptAll($, ctx).catch(() => setNotice($, MESSAGES.saveFailed)),
         ignore: candidate => void ignoreCandidate($, candidate).catch(() => setNotice($, MESSAGES.saveFailed)),
         close: () => void closePane($).catch(ignore),
+        test: text => void testText($, ctx, text).catch(() => setNotice($, MESSAGES.testFailed)),
       },
     );
   });

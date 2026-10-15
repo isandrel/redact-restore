@@ -11,7 +11,16 @@ import { maskPreview, type RuleProblem, type StoredRule } from './rules.ts';
 import type { ScanCandidate } from './scan.ts';
 import type { StatusStats } from './status.ts';
 
-export type PaneTab = 'rules' | 'scan' | 'session';
+export type PaneTab = 'rules' | 'scan' | 'session' | 'test';
+
+/** The Test tab's result: computed on this machine, never recorded in the session or sent anywhere. */
+export interface TestView {
+  readonly text: string;
+  /** The text as the model would receive it. */
+  readonly masked: string;
+  /** Each value found, once, in order: its label and the original. */
+  readonly found: ReadonlyArray<{ readonly label: string; readonly value: string }>;
+}
 
 /** One placeholder this session minted, and the value it stands for (shown masked unless revealed). */
 export interface SessionEntry {
@@ -100,6 +109,7 @@ export interface PaneView {
   readonly reveal: boolean;
   readonly notice: string;
   readonly draft: RuleDraft;
+  readonly test?: TestView;
 }
 
 export interface ScanView {
@@ -143,6 +153,8 @@ export interface PaneActions {
   acceptAll(): void;
   ignore(candidate: ScanCandidate): void;
   close(): void;
+  /** Checks text in the Test tab; empty clears it. */
+  test(text: string): void;
 }
 
 export type PaneElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Button'> & {
@@ -216,6 +228,9 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
       >
         Session
       </Button>
+      <Button key="tab-test" variant={tab === 'test' ? 'primary' : 'secondary'} onPress={() => act.show('test')}>
+        Test
+      </Button>
       <Button key="reveal" onPress={() => act.toggleReveal()}>
         {data.view.reveal ? 'Hide values' : 'Show values'}
       </Button>
@@ -226,6 +241,59 @@ export function drawPane(ui: PaneElements, data: PaneData, act: PaneActions) {
   );
 
   const notice = data.view.notice ? <Text bold>{data.view.notice}</Text> : null;
+
+  if (tab === 'test') {
+    const result = data.view.test;
+    return (
+      <Box flexDirection="column" gap={1}>
+        {header}
+        {notice}
+        <Text dimColor>
+          Paste text to see what the model would receive. It is checked on this machine: nothing is sent, saved or added
+          to the session.
+        </Text>
+        {data.canType && Input ? (
+          <Input
+            key="test-input"
+            label="Text to check"
+            placeholder="Paste a log, config or message"
+            submitLabel="check"
+            autoFocus
+            onSubmit={text => act.test(text)}
+          />
+        ) : (
+          <Text dimColor>Testing text needs the terminal or the desktop app.</Text>
+        )}
+        {result ? (
+          <Box flexDirection="column" gap={1}>
+            <Box flexDirection="column">
+              <Text bold>The model would see</Text>
+              <Text>{result.masked}</Text>
+            </Box>
+            <Box flexDirection="column">
+              <Text bold>
+                {result.found.length === 0
+                  ? 'Nothing found: this text would be sent as it is.'
+                  : `${result.found.length} value(s) found`}
+              </Text>
+              {result.found.map((item, index) => (
+                <Box key={`found-${index}`} flexDirection="row" gap={1} flexWrap="wrap">
+                  <Text dimColor>{item.label}</Text>
+                  <Text>{shown(item.value)}</Text>
+                </Box>
+              ))}
+              {result.found.length === 0 ? (
+                <Text dimColor>Something private in it? Add it as a rule on the Rules tab.</Text>
+              ) : null}
+            </Box>
+            <Button key="test-clear" onPress={() => act.test('')}>
+              Clear
+            </Button>
+          </Box>
+        ) : null}
+      </Box>
+    );
+  }
 
   if (tab === 'session') {
     const { stats, metrics: m } = data.session;

@@ -67,6 +67,23 @@ function knownTokenPattern(vault: Vault, scheme: PlaceholderScheme = DEFAULT_SCH
   return tokenCache.pattern;
 }
 
+/** Each private value in the text, once and in order, with its label: for a local preview, never for sending. */
+export function uniqueMatches(
+  text: string,
+  options: MatchingOptions,
+  vault: Vault,
+): Array<{ label: string; value: string }> {
+  const scheme = options.placeholders ?? DEFAULT_SCHEME;
+  const seen = new Set<string>();
+  const found: Array<{ label: string; value: string }> = [];
+  for (const match of findPrivateMatches(text, options, knownValues(vault, scheme), Object.keys(vault))) {
+    if (seen.has(match.value)) continue;
+    seen.add(match.value);
+    found.push({ label: options.rules?.get(match.value.toLowerCase())?.label ?? match.category, value: match.value });
+  }
+  return found;
+}
+
 export function maskText(text: string, options: MatchingOptions, vault: Vault): MaskResult {
   const scheme = options.placeholders ?? DEFAULT_SCHEME;
   const matches = findPrivateMatches(text, options, knownValues(vault, scheme), Object.keys(vault));

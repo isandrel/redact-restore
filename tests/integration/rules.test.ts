@@ -440,6 +440,37 @@ describe('import and export', () => {
   });
 });
 
+describe('test tab', () => {
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`shows on ${surface} what the model would receive, and records nothing`, async ($, on) => {
+      world(on);
+      expect(await run($, 'test')).toMatch(/^Redact Restore test pane opened\./);
+      const pane = await mountPane($, surface);
+      await pane.input({ key: 'test-input', text: 'mail alice@example.com SERVICE_USER=svc-team42 about nothing' });
+      await eventually(async () => (await pane.find({ text: /2 value\(s\) found/ })) !== undefined);
+      const drawn = JSON.stringify(await pane.drawn());
+      expect(drawn).toMatch(
+        /mail \{\{PRIVATE:EMAIL#[a-f0-9]{12}\}\} SERVICE_USER=\{\{PRIVATE:ENV#[a-f0-9]{12}\}\} about nothing/,
+      );
+      expect(drawn).not.toContain('alice@example.com');
+      expect(drawn).not.toContain('svc-team42');
+      expect(await run($, 'status')).toMatch(/This session: nothing masked yet/);
+      await pane.press({ key: 'reveal' });
+      await eventually(async () => JSON.stringify(await pane.drawn()).includes('svc-team42'));
+      await pane.press({ key: 'close' });
+      await eventually(async () => !JSON.stringify(await pane.drawn()).includes('svc-team42'));
+    });
+  }
+
+  test('text with nothing private says it would be sent as it is', async ($, on) => {
+    world(on);
+    await run($, 'test');
+    const pane = await mountPane($, 'desktop');
+    await pane.input({ key: 'test-input', text: 'refactor the parser' });
+    await eventually(async () => (await pane.find({ text: /sent as it is/ })) !== undefined);
+  });
+});
+
 describe('session tab', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`shows this session's counts and placeholders on ${surface}, values masked`, async ($, on) => {

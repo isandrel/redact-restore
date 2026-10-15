@@ -158,7 +158,7 @@ claude plugin install redact-restore@redact-restore
 
 **2. Use Claude as usual.** Paste logs, configs or snippets with tokens and secrets: emails, API keys, passwords, private keys, `KEY=value` settings, card, phone and ID numbers are masked before they leave and restored on your screen.
 
-**3. Add what detectors cannot know**, such as names, customers and codenames:
+**3. Add what detectors cannot know**, such as names, customers and codenames. Unsure about a piece of text? `/redact-restore test` shows what the model would receive, on your machine, before you send it:
 
 - `/redact-restore scan` finds your git identity, coworkers, remotes, machine and account names, and `.env` values; `/redact-restore scan PATH` checks any folder or file. It runs on your machine, so nothing is sent to the model to judge. Pick **Add** or **Ignore** in the pane.
 - `/redact-restore rules` adds your own in a form: the private value (`Acme Corp`), then a label (`CUSTOMER`) or a fixed alias (`CLIENT_A`), with a preview of what the model sees.

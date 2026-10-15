@@ -66,12 +66,20 @@ export type RedactRestoreDraft = {
   readonly editing: boolean;
 };
 
+export type RedactRestoreTest = {
+  readonly text: string;
+  readonly masked: string;
+  readonly found: ReadonlyArray<{ readonly label: string; readonly value: string }>;
+};
+
 export type RedactRestorePane = {
-  readonly view: 'rules' | 'scan' | 'session';
+  readonly view: 'rules' | 'scan' | 'session' | 'test';
   readonly reveal: boolean;
   readonly notice: string;
   /** The rule form; holds a typed value (an original) while it is filled in. */
   readonly draft: RedactRestoreDraft;
+  /** The Test tab: pasted text (an original), what the model would receive, and what was found. */
+  readonly test?: RedactRestoreTest;
 };
 
 declare module 'claude-code' {

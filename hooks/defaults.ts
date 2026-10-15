@@ -143,7 +143,7 @@ export const RULE_LABELS: readonly string[] = [
 /** Placeholders listed on the pane's Session tab (the newest). */
 export const SESSION_PLACEHOLDER_LIMIT = 50;
 export const COMMAND = 'redact-restore';
-export const COMMAND_HINT = 'rules | scan | session | status | export [file] | import <file> [--replace]';
+export const COMMAND_HINT = 'rules | scan [path] | test | session | status | export [file] | import <file> [--replace]';
 export const PANE_ID = 'redact-restore';
 export const PANE_TITLE = 'Redact Restore';
 
@@ -158,6 +158,7 @@ export const MESSAGES = {
   restoreDenied: 'Redact Restore: a private placeholder could not be restored; tool call denied.',
   saveFailed: 'Redact Restore could not save the rules; nothing changed.',
   scanFailed: 'Scan failed.',
+  testFailed: 'The check failed; nothing was sent.',
   commandFailed:
     'Redact Restore: the command failed; nothing was changed or only part of it was. Run /redact-restore status.',
   rulesUnreadable:

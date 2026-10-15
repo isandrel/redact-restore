@@ -25,7 +25,8 @@ You only ever see placeholders. Deciding what is private happens on the user's m
    - Pane rules are kept in the plugin store on this computer (a local JSON file), take effect at once, and can be exported.
    - Values entered in `/plugin` → Installed → redact-restore → Configure options → Exact private values go to the system keychain. They need a new session and are never exported.
 4. **Start clean.** A value that is already in the conversation was sent before the rule existed. The next request is then blocked by the pre-send audit. Tell the user to run `/clear` (or `/rewind`) after adding rules mid-conversation.
-5. **Check.** Ask the user to run `/redact-restore status`, or to watch the status line under the prompt.
+5. **Preview a paste.** To see what the model would receive from a piece of text before sending it, ask the user to run `/redact-restore test` and paste it into the **Test** tab. It runs on their machine; nothing is sent or recorded.
+6. **Check.** Ask the user to run `/redact-restore status`, or to watch the status line under the prompt.
 
 ## What is covered
 
