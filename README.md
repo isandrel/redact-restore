@@ -167,7 +167,7 @@ claude plugin install redact-restore@redact-restore
 
 **4. Start clean and check.** Run `/clear`, then `/redact-restore session` or look at the status line under the prompt. Ask Claude to spell a protected value character by character: it can only spell the placeholder.
 
-Update later with `claude plugin update redact-restore@redact-restore`. The plugin also ships skills you can ask for by name: `/redact-restore:protect`, `:scan`, `:status`, `:policy`, `:placeholders`, `:troubleshoot`, `:import` and `:export`.
+Update later with `claude plugin update redact-restore@redact-restore`. The plugin also ships skills you can ask for by name: `/redact-restore:protect`, `:scan`, `:status`, `:policy`, `:placeholders`, `:data`, `:troubleshoot`, `:import` and `:export`.
 
 > Requires Claude Code 2.1.287 or newer with Mods support (the desktop app's Code tab from 2.1.286). A user-scope install is active in every CLI and Desktop Code session; `--scope local` limits it to one folder.
 

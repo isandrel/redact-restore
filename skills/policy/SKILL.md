@@ -33,6 +33,10 @@ A placeholder that the session does not know is never guessed: the call is refus
 
 The user changes these in `/plugin` → Installed → redact-restore → Configure options, then starts a new session. Do not edit settings files for them unless they ask.
 
+## On screen
+
+Separate from tools: with `restore_display` (default on), the user sees originals in the rows listed in `restore_display_rows` (default: user and assistant messages, tool calls and their results, and `AskUserQuestion` dialogs). `restore_streaming` (default on) restores replies while they stream. Only what is drawn changes; the stored conversation and everything you receive keep placeholders.
+
 ## When you see a refusal
 
 `Redact Restore: Write would receive private placeholder text, and restoration is off for it` means the call held a placeholder and the policy does not restore for that tool. `Write`, `Edit` and `NotebookEdit` are restored under both `all` and `files`, so for them this happens under `restore_mode: none`. Rewrite the call without the placeholder, or ask the user to change the option. Never try to reconstruct the original value.

@@ -136,7 +136,7 @@ The trade-off: with `stable`, the model provider can tell that two sessions ment
 
 The command's output reaches the model, so it holds counts, labels and paths only. A value already in the conversation was sent before its rule existed: the pre-send audit then blocks the next request until you `/clear` or `/rewind`. A removed rule keeps masking in the current session (the session remembers what it has masked) until `/clear`.
 
-The plugin also ships skills that guide you through these: `/redact-restore:protect`, `:scan`, `:status`, `:policy`, `:placeholders`, `:troubleshoot`, `:import` and `:export`.
+The plugin also ships skills that guide you through these: `/redact-restore:protect`, `:scan`, `:status`, `:policy`, `:placeholders`, `:data`, `:troubleshoot`, `:import` and `:export`.
 
 ## Status fields
 

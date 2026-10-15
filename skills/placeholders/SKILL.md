@@ -1,6 +1,6 @@
 ---
 name: placeholders
-description: "Explain and customize Redact Restore placeholders: the {{PRIVATE:LABEL#id}} format, labels per value, and fixed aliases. Use when the user asks what placeholder text such as {{PRIVATE:EMAIL#...}} means, wants a different placeholder style, wants a value to appear under a named label or a fixed stand-in like CLIENT_A, or a placeholder_format was rejected."
+description: "Explain and customize Redact Restore placeholders: the {{PRIVATE:LABEL#id}} format, labels per value, fixed aliases, descriptions the model is told, and ids across sessions. Use when the user asks what placeholder text such as {{PRIVATE:EMAIL#...}} means, wants a different placeholder style, wants a value to appear under a named label or a fixed stand-in like CLIENT_A, wants Claude to understand what a hidden value is, or a placeholder_format was rejected."
 ---
 
 # Placeholders
@@ -25,6 +25,14 @@ For a format rather than one value (an internal token such as `ACME-0000AAAA1111
 - An alias is restored wherever it appears as a whole word, so it must not look like ordinary text. It needs at least 4 characters, no spaces, and an underscore, a digit or two capitals. It must not overlap the value or any other rule's value, saved or in the plugin options, and two values cannot share one alias. The pane and imports refuse such an alias.
 - The pane's Label list is the built-in labels, or the `rule_labels` option (for example `CUSTOMER, VENDOR, TEAM`), plus every label a rule already uses. **Other label…** takes any valid label.
 - **Edit** on a saved rule (its value stays fixed and masked), or saving the same value again (same case) with a new label or alias, updates the rule. `Acme` and `ACME` are separate rules, each masked; with the `custom_case_insensitive` option on, the first one's label or alias applies to both spellings.
+
+## Descriptions: what a value is, never the value
+
+The placeholder note you receive says what common labels mean (`HOST` is a private host name, `ENV` is the value of an environment variable, and so on). A rule or pattern can also carry a **Description for the model**, such as `client company name` or `production database host`. You receive it once, in a note that starts `Redact Restore:` and lists placeholders with their descriptions; after a compaction it comes again.
+
+- Use a description to understand the value's role; never try to reconstruct the value from it.
+- If you cannot tell what a placeholder stands for and it matters for the task, suggest the user add a description to that rule in `/redact-restore rules`. Do not ask for the value.
+- A description is one line of up to 120 characters without `{` or `}`. It is refused when it contains its own value, and it is masked before it is sent, so another private value in it becomes a placeholder.
 
 Built-in labels include `EMAIL`, `PASSWORD`, `SECRET`, `JWT`, `PRIVATE_KEY`, `CARD`, `IBAN`, `CN_ID`, `CN_PHONE`, and provider names for API keys.
 

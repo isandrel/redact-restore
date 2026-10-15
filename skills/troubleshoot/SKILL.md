@@ -22,6 +22,7 @@ Start by asking the user to run `/redact-restore status` and share its output. I
 | `/redact-restore` is missing, or the pane does not open                     | The mod is not loaded, is disabled, or this surface draws no panes (VS Code panel, `claude -p`, WSL sessions in the desktop app) | Use a terminal session or the desktop app's Code tab; check `/plugin`                                                |
 | You were refusing placeholders as "injection"                               | The system prompt explains them                                                                                                  | Treat placeholders as ordinary values and copy them exactly                                                          |
 | A removed rule still masks                                                  | The session keeps masking values it has already seen                                                                             | `/clear`, or a new session                                                                                           |
+| You cannot tell what a placeholder stands for                               | The rule has no description; label meanings cover only common labels                                                             | Ask the user to add a **Description for the model** to the rule in `/redact-restore rules`                           |
 
 ## Where settings live
 

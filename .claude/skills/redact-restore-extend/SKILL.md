@@ -30,6 +30,17 @@ Second rule: **what is private is decided on the user's machine, never by the mo
 | User skills shipped with the plugin     | `skills/<name>/SKILL.md`                                      | End-user help only; never ask users to type values in chat                                                                                                                                                                                |
 | State shape                             | `types/index.d.ts`                                            | Declare every `$.state` key under `redact-restore`                                                                                                                                                                                        |
 
+## Performance rules
+
+Every hook on the prompt path runs on each request of a session that may hold megabytes of text and thousands of placeholders.
+
+- **A vault is never changed in place.** `record()` and `$.state` updates make a new object; `privacy.ts` caches lookups per vault object (`vaultView`). A masker keeps its own new values apart (`Pending`), so one new value never rebuilds the whole index.
+- **No work proportional to the vault per text.** Known values are compiled in power-of-two segments (`matcher.ts`); reuse them, never compile `Object.keys(vault)` per call.
+- **No quadratic loops over matches.** Overlap checks walk sorted lists with one pointer; never `array.some(...)` per match.
+- **Keyword first.** A regex that is costly on large input runs only in windows around a literal keyword found in one pass (gitleaks, pattern rules).
+- **Render hooks are read-only.** A `ui.render` hook may not write `$.state`; read what it needs (see `displayVault`).
+- Measure with `bun run bench` before and after, and keep `tests/unit/scale.test.ts` passing.
+
 ## API lookup
 
 The engine's own declarations are the authority, not memory or online examples: grep `.claude-plugin/types/claude-code/index.d.ts` (written when an interactive `claude --plugin-dir .` session loads the folder) for the event (`'prompt.attachment'`), then read its input and result types and the `@remarks`.
@@ -51,6 +62,8 @@ The engine's own declarations are the authority, not memory or online examples: 
 
 - `session.append` puts back `tool_use` and thinking blocks; only text and `tool_result` content are rewritable.
 - `prompt.attachment` fires inside `turn.step`, after the audit reads messages; `$.session.messages()` can hold raw attachment copies (subagents, after compaction), so the audit skips `<system-reminder>` blocks.
-- `$.state` survives hot reload, resets per process (`--resume` starts empty), and is readable by any plugin.
+- `$.state` survives hot reload, resets per process (`--resume` starts empty; `persist_session_map` reloads the vault from `~/.claude/redact-restore/sessions/`), and is readable by any plugin.
+- `$.state.set` is refused while a `ui.render` hook draws.
+- `$.fs` has no delete or chmod: `register.ts` uses `$.process.run` (`rm`, `chmod`, `mkdir -m`) best effort, and must work when they fail (Windows).
 - A hooks module may import only `claude-code` and its own files by relative path: an npm library must be vendored as a file in the plugin (with its license), never imported by name.
 - Options for `--plugin-dir` come from user settings, `--settings`, or managed settings only.

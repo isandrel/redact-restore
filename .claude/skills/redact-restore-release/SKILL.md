@@ -14,4 +14,9 @@ description: Prepare a Redact Restore version - bump the version, update CHANGEL
 4. **Verify.** Run the `redact-restore-verify` skill (validate, tsc, tests, personal-data check). All must pass.
 5. **Commit.** Conventional Commits with a gitmoji prefix (`✨ feat: …`, `🐛 fix: …`, `🔖 chore(release): …`), staged files reviewed (`git status`, `git diff --cached`). Messages and docs use synthetic values only.
 6. **Branches.** Work on a feature branch; when done, fast-forward `main` and delete the merged branch only if the user asked to keep `main` alone. No push unless the user asks.
-7. **Before publishing anywhere** (a GitHub repository, a marketplace): commit author emails are personal data. Suggest a repository-local `git config user.email` with a no-reply address, and get the user's decision before rewriting any history.
+7. **Tags and GitHub Releases only on request.** Pushing a `v*` tag publishes a GitHub Release (`.github/workflows/release.yml`). Never create or push a tag, even when "release" is on a task list: prepare everything, run CI on `main`, then give the user the exact command and wait for them to ask:
+
+   ```bash
+   git tag -a v<version> -m "Redact Restore v<version>" && git push origin v<version>
+   ```
+8. **Before publishing anywhere** (a GitHub repository, a marketplace): commit author emails are personal data. Suggest a repository-local `git config user.email` with a no-reply address, and get the user's decision before rewriting any history.

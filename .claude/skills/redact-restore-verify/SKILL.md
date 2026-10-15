@@ -31,7 +31,23 @@ Run from the repository root. Report each step as passed or failed, with the sho
    claude plugin test .
    ```
 
-4. Personal data. Check the staged diff for real names, emails, home paths (`/Users/<name>/`), host names and tokens before committing; replace any with synthetic values (`alice@example.com`, `Project Phoenix`, `/path/to/...`). A maintainer may keep a local-only scanner in `.local/` (gitignored); run it when present. Everything tracked is published, including `skills/` and `.claude/skills/`: check them the same way.
+4. Formatting (Biome for TypeScript, dprint for Markdown):
+
+   ```bash
+   bun run format:check
+   ```
+
+   Fix with `bun run format`.
+
+5. Performance, when the change touches matching, masking, detectors, the vault or a hook on the prompt path. Compare against the numbers before the change; report the lines that moved:
+
+   ```bash
+   bun run bench
+   ```
+
+   On a laptop, 1 MB of tool output masks in about 60 ms and 300 rows against a 10,000-value vault in well under a second (`tests/unit/scale.test.ts` guards both with wide margins).
+
+6. Personal data. Check the staged diff for real names, emails, home paths (`/Users/<name>/`), host names and tokens before committing; replace any with synthetic values (`alice@example.com`, `Project Phoenix`, `/path/to/...`). A maintainer may keep a local-only scanner in `.local/` (gitignored); run it when present. Everything tracked is published, including `skills/` and `.claude/skills/`: check them the same way.
 
 ## Rules
 
