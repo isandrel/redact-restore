@@ -32,4 +32,4 @@ body:
     id: versions
     attributes:
       label: Versions
-      placeholder: Claude Code 2.1.287, Redact Restore 0.13.0
+      placeholder: Claude Code 2.1.292, Redact Restore 0.1.0

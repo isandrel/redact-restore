@@ -62,7 +62,7 @@ body:
     attributes:
       label: Versions
       description: Claude Code (`claude --version`, or `/status` in Desktop Code) and Redact Restore
-      placeholder: Claude Code 2.1.287, Redact Restore 0.13.0
+      placeholder: Claude Code 2.1.292, Redact Restore 0.1.0
     validations:
       required: true
 
