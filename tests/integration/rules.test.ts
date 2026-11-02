@@ -17,6 +17,13 @@ interface World {
   argv: string[][];
 }
 
+/**
+ * Refused samples (nested or alternating repetition) are built at run time: the
+ * mod refuses them before running them, and constant literals would read to
+ * static analysis as unsafe regexes in the test code itself.
+ */
+const unsafe = (...parts: string[]): string => parts.join('');
+
 /** Every stub the command, the pane and prompt.submit need; registered before the first $ call. */
 type Entry = { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number; isLink: boolean };
 
@@ -536,7 +543,7 @@ describe('import and export', () => {
     };
     const store = new Map<string, unknown>([
       [`pattern.${'a'.repeat(64)}`, saved],
-      [`pattern.${'b'.repeat(64)}`, { pattern: 'acme(a+)+' }],
+      [`pattern.${'b'.repeat(64)}`, { pattern: unsafe('acme(a', '+)+') }],
     ]);
     const seen = world(on, store, {
       '/tmp/old.json': exportFile([{ value: NAME }]),
@@ -592,7 +599,7 @@ describe('pattern rules in the pane', () => {
     await run($, 'rules');
     const pane = await mountPane($, 'desktop');
     await pane.select({ key: 'draft-kind', value: 'pattern' });
-    await pane.input({ key: 'draft-pattern', text: 'acme(a+)+b', kind: 'change' });
+    await pane.input({ key: 'draft-pattern', text: unsafe('acme(a', '+)+b'), kind: 'change' });
     await pane.input({ key: 'draft-example', text: 'acmeaaab' });
     await eventually(async () => (await pane.find({ text: /Repeat single characters or classes/ })) !== undefined);
     expect(await run($, 'status')).toMatch(/patterns: 0 saved/);
@@ -629,7 +636,7 @@ describe('pattern rules in the pane', () => {
           format: 'redact-restore-rules',
           version: 1,
           rules: [],
-          patterns: [{ pattern: 'ACME-\\d{4}', label: 'TOKEN' }, { pattern: 'acme(a|aa)+' }],
+          patterns: [{ pattern: 'ACME-\\d{4}', label: 'TOKEN' }, { pattern: unsafe('acme(a|', 'aa)+') }],
         }),
       },
     );

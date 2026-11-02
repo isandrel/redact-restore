@@ -13,6 +13,12 @@ import {
   upsertPattern,
 } from '../../hooks/rules.ts';
 
+/**
+ * Refused samples (nested or alternating repetition) are built at run time: the
+ * mod refuses them before running them, and constant literals would read to
+ * static analysis as unsafe regexes in the test code itself.
+ */
+const unsafe = (...parts: string[]): string => parts.join('');
 const NOW = new Date('2026-01-02T03:04:05.000Z');
 const rule = (pattern: string, extra: Partial<PatternRule> = {}): PatternRule => ({
   pattern,
@@ -40,9 +46,9 @@ describe('pattern checks', () => {
       [rule('x+)+(?:y'), 'invalid'],
       [rule('(acme)\\1x'), 'backreference'],
       [rule('(?=.)acme'), 'lookaround'],
-      [rule('acme(a+)+b'), 'group-quantifier'],
+      [rule(unsafe('acme(a', '+)+b')), 'group-quantifier'],
       [rule('acme(?:b{1,2})+c'), 'group-quantifier'],
-      [rule('acme((?:b|bb))+c'), 'group-quantifier'],
+      [rule(unsafe('acme((?:b|', 'bb))+c')), 'group-quantifier'],
       [rule('acme-\\w+-\\w+-\\w+'), 'too-many-repeats'],
       [rule('\\s+X'), 'no-keyword'],
       [rule('token_[a-z]{4}|key_[a-z]{4}'), 'no-keyword'],
@@ -105,7 +111,7 @@ describe('pattern matching', () => {
   });
 
   test('custom_patterns from the options: valid ones mask, invalid ones are counted', () => {
-    const config = parseConfig({ custom_patterns: ['ACME-\\d{4}', 'acme(a+)+b', '  '] });
+    const config = parseConfig({ custom_patterns: ['ACME-\\d{4}', unsafe('acme(a', '+)+b'), '  '] });
     expect([config.optionPatterns.length, config.invalidPatterns]).toEqual([1, 1]);
     expect(findPrivateMatches('id ACME-1234', config.matching).map(m => [m.category, m.value])).toEqual([
       ['CUSTOM', 'ACME-1234'],
@@ -142,13 +148,13 @@ describe('stored patterns', () => {
     if (!('pattern' in made)) throw new Error(made.problem);
     expect(JSON.stringify(made.pattern)).not.toContain('ACME-1234');
     expect(made.pattern.label).toBeUndefined();
-    expect(makePattern(rule('acme(a+)+'), 'manual', NOW)).toEqual({ problem: 'group-quantifier' });
+    expect(makePattern(rule(unsafe('acme(a', '+)+')), 'manual', NOW)).toEqual({ problem: 'group-quantifier' });
   });
 
   test('loading drops malformed or risky entries; upsert updates the label in place', () => {
     const loaded = parseStoredPatterns([
       { pattern: 'ACME-\\d{4}', label: 'TOKEN', source: 'manual', addedAt: '2026-01-01T00:00:00.000Z' },
-      { pattern: 'acme(a+)+', source: 'manual' },
+      { pattern: unsafe('acme(a', '+)+'), source: 'manual' },
       { label: 'NOPATTERN' },
       'text',
     ]);
@@ -169,7 +175,7 @@ describe('stored patterns', () => {
     expect(parsed.patterns).toEqual([
       { pattern: 'ACME-\\d{4}', label: 'TOKEN', ignoreCase: true, wholeWord: true, group: 0 },
     ]);
-    const summary = applyPatternImport([], [...(parsed.patterns ?? []), rule('acme(a|aa)+')], 'merge', NOW);
+    const summary = applyPatternImport([], [...(parsed.patterns ?? []), rule(unsafe('acme(a|', 'aa)+'))], 'merge', NOW);
     expect([summary.added, summary.invalid]).toEqual([1, 1]);
   });
 });

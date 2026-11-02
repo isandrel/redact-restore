@@ -86,7 +86,11 @@ function harness(
     if (e.component === 'UserMessage' || e.component === 'AssistantMessage') seen.drawn.push(e.props.text);
     if (e.component === 'ToolUse') seen.drawn.push(JSON.stringify([e.props.input, e.props.output]));
     if (e.component === 'ToolResult') seen.drawn.push(JSON.stringify(e.props.output));
-    if (e.component === 'AskUserQuestion') seen.drawn.push(JSON.stringify(e.props.questions));
+    if (e.component === 'AskUserQuestion') {
+      seen.drawn.push(JSON.stringify(e.props.questions));
+      // The question dialog must hold the engine's own node exactly once (CLI 2.1.309).
+      return { type: 'engine', ref: 0 } as never;
+    }
     return h('Text', null, 'drawn') as never;
   });
   on('session.messages', () => ({ value: messages }) as never);
